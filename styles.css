@@ -1,0 +1,107 @@
+/* Doplňky k Tailwindu */
+
+.scroll-thin { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 99px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+.zbtn {
+  width: 2.25rem; height: 2.25rem;
+  display: grid; place-items: center;
+  border-radius: .75rem;
+  background: rgba(17,24,48,.9);
+  border: 1px solid rgba(255,255,255,.1);
+  color: #e2e8f0;
+  font-size: 1.15rem; font-weight: 700; line-height: 1;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  transition: background .15s, transform .12s;
+}
+.zbtn:hover { background: rgba(36,48,85,.95); }
+.zbtn:active { transform: scale(.93); }
+
+.flt.on {
+  background: linear-gradient(to right, #ffb43a, #ff9500);
+  color: #1a1206; border-color: transparent; font-weight: 700;
+}
+
+.chip {
+  padding: .2rem .55rem; border-radius: 99px; font-size: 11px;
+  border: 1px solid rgba(255,255,255,.12);
+  display: inline-flex; align-items: center; gap: .3rem;
+  transition: all .15s; cursor: pointer; line-height: 1.4;
+}
+.chip:hover { background: rgba(255,255,255,.08); }
+.chip.on { background: rgba(255,180,58,.16); border-color: #ffb43a; color: #ffd08a; }
+
+/* ===================== MAPA ===================== */
+#viewport { transform-origin: 0 0; --fs: 11px; --fs-big: 26px; --fs-ctx: 11px; --fs-ctx-big: 15px; --sw: 1; }
+
+/* okolí centra */
+.ctx { pointer-events: none; }
+.ctx-lab {
+  font-size: var(--fs-ctx);
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  fill: #5a6a93;
+  text-transform: uppercase;
+}
+.ctx-lab.big { font-size: var(--fs-ctx-big); fill: #8ea0c9; letter-spacing: 2px; }
+
+.fc-halo, .fc-edge { pointer-events: none; }
+.fc-title { pointer-events: none; font-size: var(--fs-big); font-weight: 800; }
+
+/* jednotky půdorysu */
+.unit { cursor: default; }
+.unit .u-shape {
+  stroke: rgba(255,255,255,.08);
+  stroke-width: calc(var(--sw) * 1);
+  fill-opacity: 1;
+  transition: fill .25s, fill-opacity .25s, stroke .15s;
+}
+.unit.tracked { cursor: pointer; }
+.unit.tracked .u-shape {
+  fill-opacity: .55;
+  stroke: rgba(255,255,255,.3);
+  stroke-width: calc(var(--sw) * 1.6);
+}
+.unit.tracked:hover .u-shape { fill-opacity: .85; stroke: #fff; }
+.unit.tracked.visited .u-shape { fill-opacity: .7; }
+.unit.tracked.sel .u-shape {
+  fill-opacity: .95; stroke: #fff;
+  stroke-width: calc(var(--sw) * 3);
+  filter: url(#glow);
+}
+.unit.dim { opacity: .2; }
+
+/* popisky */
+.lab { pointer-events: none; }
+/* odznak s logem je plnohodnotný klikatelný cíl */
+.lab .mark { pointer-events: auto; cursor: pointer; }
+.lab.dim { opacity: .18; }
+.u-label {
+  font-size: var(--fs);
+  font-weight: 500;
+  paint-order: stroke;
+  stroke: rgba(8,12,26,.85);
+  stroke-width: calc(var(--sw) * 2.4);
+  stroke-linejoin: round;
+}
+.u-label.is-v { font-weight: 800; letter-spacing: -.2px; }
+.lab.sel .u-label { fill: #ffd08a; }
+
+@keyframes slideup { from{transform:translateY(16px);opacity:0} to{transform:translateY(0);opacity:1} }
+.animate-slideup { animation: slideup .22s ease-out; }
+
+.row-card { transition: background .15s, border-color .15s, transform .12s; }
+.row-card:hover { transform: translateX(2px); }
+
+@media print { #sidebar, #detail, header { display:none } }
+
+/* ---------- výkon ---------- */
+/* statická vrstva okolí se nikdy nemění a nereaguje na ukazatel */
+.layer-static { pointer-events: none; shape-rendering: optimizeSpeed; }
+.layer-static text { shape-rendering: auto; }
+/* omezíme přepočty rozvržení mimo mapu */
+#mapWrap { contain: layout paint style; }
+#viewport { will-change: transform; }

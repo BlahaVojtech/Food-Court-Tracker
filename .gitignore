@@ -1,0 +1,12 @@
+node_modules/
+
+# Velké zdrojové dumpy třetích stran — stahují se skripty v tools/
+# (viz README, sekce „Odkud data pocházejí“). Výsledky generátorů
+# (plan.js, surround.js, extra.js, logos/) jsou v repozitáři.
+tools/vgmap.json
+tools/dc.js
+tools/osm.json
+
+# dočasné výstupy
+*.png
+!docs/*.png
