@@ -1,45 +1,54 @@
 # 🍔 Food Court Tracker — Forum Nová Karolina
 
 Webový záznamník navštívených restaurací a podniků ve **Forum Nová Karolina v Ostravě**,
-postavený nad **skutečným půdorysem** z oficiální mapy centra.
+postavený nad **skutečným půdorysem** z oficiální mapy centra a zasazený do **georeferencované
+mapy okolí** z OpenStreetMap.
 
 Vše běží čistě v prohlížeči — **žádný backend, žádná databáze**. Data se ukládají do `localStorage`.
 
 ## Funkce
 
 - **Interaktivní mapa se skutečným půdorysem** — 5 pater, 262 jednotek převzatých z oficiální
-  navigace centra (`forumnovakarolina.cz/mapa-centra/`), ve stejné orientaci jako originál
-- **Skutečná loga podniků** místo ikon — také z dat oficiální navigace
+  navigace centra (`forumnovakarolina.cz/mapa-centra/`)
+- **Správná geografická orientace** — půdorys je převeden do UTM 34N a vykreslen **severem nahoru**,
+  stejně jako na mapy.cz nebo Google Maps (viz [Georeference](#georeference))
+- **Skutečné okolí z OpenStreetMap** — budovy, silnice, železniční i tramvajové koleje,
+  zeleň, parkoviště a názvy ulic kolem centra
+- **Skutečná loga podniků** místo ikon, rasterizovaná do WebP
 - **Červená = nenavštíveno, zelená = navštíveno** — stav je vidět na první pohled
-- **Schematické okolí** — ul. Jantarová, 28. října, Porážková, železniční koleje,
-  Trojhalí Karolina, Organica Building, Nová Karolina Park, parkoviště a park
+- **Podniky v okolí centra** — Frankie's Pub, Kanteen Organica a Cokafe jsou vidět nad každým patrem
 - Plynulý **pan & zoom** jako u reálné mapy (kolečko, tažení, pinch na mobilu, dvojklik)
-- **LOD popisky** — názvy jednotek se objevují podle přiblížení, aby se nepřekrývaly
-- Odškrtávání navštívených podniků, **hodnocení hvězdičkami**, datum návštěvy a poznámka
-- Vyhledávání, filtry (vše / zbývá / hotovo) a filtrování podle kategorie
-- Statistiky, export/import dat v JSON
-- Responzivní design (Tailwind CSS přes CDN), funguje na mobilu i desktopu
+- **Kompas a grafické měřítko**, **LOD popisky** podle přiblížení
+- Klik na podnik v mapě i v seznamu otevře **stejný detail** — odškrtnutí, hodnocení
+  hvězdičkami, datum návštěvy a poznámka. Dvojklik v mapě přepíná navštíveno.
+- Vyhledávání, filtry (vše / zbývá / hotovo), filtry podle kategorie, statistiky, export/import JSON
+- Responzivní design (Tailwind CSS), funguje na mobilu i desktopu
 
 ## Spuštění
 
-Stačí otevřít `index.html` v prohlížeči. Kvůli načítání skriptů je ale lepší statický server:
-
 ```bash
-cd karolina-foodcourt
-python -m http.server 8777
+git clone https://github.com/BlahaVojtech/Food-Court-Tracker.git
+cd Food-Court-Tracker
+python -m http.server 8777        # nebo: npm start
 # → http://localhost:8777
 ```
+
+Aplikace je statická — jde nasadit na GitHub Pages, Netlify i jakýkoli webhosting bez úprav.
 
 ## Struktura
 
 | Soubor | Popis |
 |---|---|
-| `index.html` | Kostra aplikace, Tailwind config, SVG `<defs>` |
-| `styles.css` | Doplňkové styly mapy (jednotky, popisky, zóna food courtu) |
-| `app.js` | Logika — pan/zoom engine, vykreslování půdorysu i okolí, seznam, localStorage |
+| `index.html` | Kostra aplikace, SVG `<defs>`, kompas, měřítko, legenda |
+| `styles.css` | Doplňkové styly mapy (jednotky, popisky, odznaky, zóna food courtu) |
+| `tailwind.css` | **Generované** Tailwind CSS (`npm run build:css`) |
+| `app.js` | Logika — pan/zoom engine, vykreslování, seznam, detail, localStorage |
 | `plan.js` | **Generovaný** půdorys: `FLOORS` (5 pater × jednotky) + `VENUES` (34 podniků) |
-| `logos.js` | **Generovaná** loga podniků (inline SVG) |
-| `tools/build-plan.js` | Generátor `plan.js` a `logos.js` ze zdrojových dat |
+| `surround.js` | **Generované** okolí z OpenStreetMap + silueta centra + rámec mapy |
+| `extra.js` | **Generované** podniky v okolí centra, které nejsou v půdorysu |
+| `logos/*.webp` | **Generovaná** loga podniků (34×, celkem ~120 kB) |
+| `logos.js` | **Generovaný** rejstřík log (rozměry pro poměr stran odznaku) |
+| `tools/` | Generátory dat (viz níže) |
 
 ## Patra
 
@@ -50,39 +59,91 @@ python -m http.server 8777
 | `p0` | `B1-P0` | 86 | 6 |
 | `m1` | `B1-P-1` | 12 | 2 |
 | `m2` | `B1-P-2` | 24 | 3 |
-## Zdroje dat
+| `out` | — (OpenStreetMap) | 3 | 3 — okolí centra, vidět vždy |
 
-Půdorys i seznam podniků pocházejí z veřejných zdrojů obchodního centra:
+## Zdroje dat
 
 1. **Seznam podniků + popisy** — WordPress REST API centra
    ```
    https://forumnovakarolina.cz/wp-json/wp/v2/obchody?per_page=100&kategorie_obchodu=133,134,135,136
-   https://forumnovakarolina.cz/wp-json/wp/v2/kategorie_obchodu?per_page=100
    ```
-2. **Půdorys, patra a obrysy jednotek** — mapový dataset VisioGlobe, který pohání oficiální
+2. **Půdorys, patra, obrysy jednotek a loga** — mapový dataset VisioGlobe, který pohání oficiální
    mapu centra (`/mapa-centra/` → iframe `navigace-v-centru.cz/karolina/web`)
    ```
    https://mapserver.visioglobe.com/k19d1d6774c3496889970fb022d6e1cfdd08cf187/map.json
    https://navigace-v-centru.cz/karolina/js/data_core.min.js
    ```
+3. **Okolí a podniky v okolí** — OpenStreetMap přes Overpass API (© přispěvatelé OpenStreetMap, ODbL)
 
-### Regenerace `plan.js`
+### Regenerace dat
+
+Velké zdrojové dumpy nejsou v repozitáři (viz `.gitignore`), stáhnou se takto:
 
 ```bash
+npm install
 cd tools
 curl -o vgmap.json https://mapserver.visioglobe.com/k19d1d6774c3496889970fb022d6e1cfdd08cf187/map.json
 curl -o dc.js      https://navigace-v-centru.cz/karolina/js/data_core.min.js
-node build-plan.js        # → ../plan.js, ../logos.js
+node fetch-osm.js          # → tools/osm.json (Overpass)
+cd ..
+npm run build              # → tailwind.css, plan.js, logos/, surround.js, extra.js
 ```
 
-Poznámky ke geometrii (ověřeno porovnáním s oficiální mapou):
+| Skript | Výstup |
+|---|---|
+| `tools/build-plan.js` | `plan.js`, `logos.js`, `logos/*.webp` |
+| `tools/build-surround.js` | `surround.js` (okolí + silueta centra) |
+| `tools/build-extra.js` | `extra.js` (podniky v okolí) |
+| `tools/frame.js` | společný souřadnicový rámec — používají ho všechny generátory |
+| `tools/geo.js` | převody UTM 34N ↔ WGS84, bez závislostí |
 
-- Souřadnice v `pois.polygons` jsou proti oficiální mapě otočené o **90° proti směru
-  hodinových ručiček** → generátor je otáčí zpět (`ROT = Math.PI / 2`).
-- `rotation_angle_in_degrees` z `geoinformation` se aplikovat **nesmí**.
-- Osa Y se **neobrací** — souřadnice už jsou v SVG prostoru (y dolů).
-- `data_core.min.js` obsahuje v názvech inline HTML/SVG — je nutné tagy odstranit.
-  Pole `svg` u každé jednotky obsahuje logo, které se ukládá do `logos.js`.
+## Georeference
+
+`map.json` obsahuje v klíči `geoinformation` plnou georeferenci:
+
+```json
+{ "rotation_angle_in_degrees": 5.97051092, "meters_per_pixel": 0.25,
+  "geo_xref": 304545.61510846537, "geo_yref": 5523064.782834832,
+  "proj": "utm --zone 34 --north" }
+```
+
+Převod pixelu půdorysu na UTM 34N:
+
+```js
+y_geo = svgHeight - y_pixel          // překlopení osy Y (zdroj je v SVG prostoru, y dolů)
+dx = x_pixel * 0.25, dy = y_geo * 0.25
+E = geo_xref + dx*cos(θ) - dy*sin(θ)
+N = geo_yref + dx*sin(θ) + dy*cos(θ)
+```
+
+Správná varianta byla ověřena měřením překryvu (IoU) s footprintem budovy
+*Forum Nová Karolina* v OpenStreetMap (`way 98290906`):
+
+| překlopení Y | znaménko rotace | IoU |
+|---|---|---|
+| ne | +1 | 0,448 |
+| ne | −1 | 0,173 |
+| **ano** | **+1** | **0,616** ✅ |
+| ano | −1 | 0,200 |
+
+Zbytkový nesoulad je dán tím, že jednotky půdorysu nevyplňují atria a chodby.
+
+**Světový rámec** (`tools/frame.js`): 1 jednotka = 0,25 m, výřez 410 × 410 m se středem
+v těžišti centra. `x` roste k východu, `y` k jihu → **sever je nahoře**.
+
+## Výkon
+
+Aplikace je laděná na plynulý pan/zoom i na slabších strojích:
+
+- **Statická vrstva** (mřížka, okolí, silueta centra) se vykreslí **jen jednou**, ne při každé změně patra
+- **Cache vrstev pater** — patro se po prvním zobrazení jen přepíná přes `display`
+- **Event delegace** — jeden posluchač na celý viewport místo tří na každou z ~90 jednotek
+- **LOD jen při změně zoomu** — při pouhém posunu se ~400 uzlů vůbec neprochází
+- Atributy se zapisují jen při skutečné změně hodnoty (`Map`/`WeakMap` lookupy místo `find()` v cyklech)
+- **Douglas-Peucker** zjednodušení geometrie OSM + zaokrouhlení souřadnic
+  (`surround.js` 55 → 27 kB, `plan.js` 138 → 103 kB)
+- Loga jako **WebP** místo inline SVG v JavaScriptu (366 kB JS → 120 kB obrázků načítaných líně)
+- **Předkompilovaný Tailwind** (20 kB CSS) místo ~120 kB blokujícího JS z `cdn.tailwindcss.com`
 
 ## Uložená data
 
@@ -97,3 +158,4 @@ Tlačítko *Vymazat* v patičce smaže vše. Export/import je v menu ⋮ v hlavi
 ---
 
 Neoficiální projekt, není nijak spojen s provozovatelem obchodního centra.
+Mapová data okolí © přispěvatelé [OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL).
