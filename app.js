@@ -1,7 +1,6 @@
 /* ============================================================
    Food Court Tracker — Forum Nová Karolina Ostrava
-   Půdorys z oficiální mapy centra (viz plan.js).
-   Vanilla JS + SVG, data synchronizována s PHP/SQLite API.
+   Plná integrace originálního mapového enginu + moderní CAD UI.
    ============================================================ */
 (() => {
 'use strict';
@@ -14,8 +13,8 @@ const SVGNS = 'http://www.w3.org/2000/svg';
 function setStorageStatus(shared) {
   const el = $('#storageStatus');
   if (!el) return;
-  el.textContent = shared ? 'Data sdílena přes server' : 'Offline režim — data jen v tomto prohlížeči';
-  el.className = shared ? 'text-emerald-400' : 'text-amber-400';
+  el.textContent = shared ? 'SYNK: SERVER' : 'SYNK: LOKÁLNÍ';
+  el.className = shared ? 'text-[#10b981]' : 'text-[#f59e0b]';
 }
 
 /* ---------- STAV & SYNCHRONIZACE ---------- */
@@ -33,7 +32,7 @@ function save(venueIdToSync = null) {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(state));
   } catch {
-    toast('Nepodařilo se uložit lokálně ⚠️', true);
+    toast('Chyba při ukládání', true);
   }
 
   if (venueIdToSync) {
@@ -59,7 +58,7 @@ async function syncVenueToServer(id) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   } catch (err) {
-    console.warn('Chyba při odesílání do databáze:', err);
+    console.warn('Lokální režim ukládání:', err);
   }
 }
 
@@ -72,14 +71,12 @@ async function syncAllFromServer() {
     }
     const data = await res.json();
     if (data && data.venues) {
-      // Po úspěšném načtení je server jediný sdílený zdroj pravdy.
       state.venues = data.venues;
       localStorage.setItem(LS_KEY, JSON.stringify(state));
       renderAll();
       setStorageStatus(true);
     }
   } catch (err) {
-    console.log('Serverové API není dostupné, běží lokální režim.');
     setStorageStatus(false);
   }
 }
@@ -101,21 +98,23 @@ const CATS = {
 };
 const cat = c => CATS[c] || { label: c, icon: '📍', color: '#64748b' };
 
-/* barvy neevidovaných jednotek půdorysu */
+/* Barvy neevidovaných jednotek */
 const KIND_FILL = { shop: '#232f52', service: '#1b2440', vert: '#2f3d68', area: '#1e2a49' };
 
-/* stav podniku: červená = nenavštíveno, zelená = navštíveno */
+/* Stav podniku: červená = nenavštíveno, zelená = navštíveno */
 const NOPE = '#ef4444', YES = '#10b981';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
 const logoMarkup = (v, cls = '') => {
   const url = typeof logoUrl === 'function' ? logoUrl(v.id) : null;
   return url
-    ? `<img src="${esc(url)}" alt="" class="${cls} object-contain" loading="lazy">`
+    ? `<img src="${esc(url)}" alt="${esc(v.name)}" class="${cls} object-contain venue-logo logo-${esc(v.id)}" loading="lazy">`
+    : ['kanteen', 'frankiespub'].includes(v.id)
+      ? `<span class="${cls} brand-word brand-${esc(v.id)}">${esc(v.id === 'kanteen' ? 'KANTEEN' : "FRANKIE'S")}</span>`
     : `<span class="${cls}">${esc(cat(v.cat).icon)}</span>`;
 };
 
-/* podniky v okolí centra (extra.js) — vlastní „patro", které je vidět vždy */
+/* Podniky v okolí centra (extra.js) */
 const OUT_ID = 'out';
 if (typeof EXTRA !== 'undefined') {
   FLOORS.push(EXTRA.floor);
@@ -123,13 +122,11 @@ if (typeof EXTRA !== 'undefined') {
 }
 const isOutside = f => !!(f && f.outside);
 
-/* vyhledávací mapy — rychlejší než opakované .find() v cyklech */
 const VEN_BY_ID = new Map(VENUES.map(v => [v.id, v]));
 const FLOOR_BY_ID = new Map(FLOORS.map(f => [f.id, f]));
 const venue = id => VEN_BY_ID.get(id) || null;
 const floorOf = id => FLOOR_BY_ID.get(id);
 
-/* geometrie sledovaných podniků: id → jednotka v půdorysu */
 const GEO = {};
 FLOORS.forEach(f => f.units.forEach(u => { if (u.v) GEO[u.v] = u; }));
 VENUES.forEach(v => { v.geo = GEO[v.id]; });
@@ -137,16 +134,16 @@ VENUES.forEach(v => { v.geo = GEO[v.id]; });
 function toast(msg, bad) {
   const t = $('#toast');
   t.textContent = msg;
-  t.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl font-semibold text-sm shadow-2xl animate-slideup ' +
-    (bad ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-slate-900');
+  t.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-3.5 py-1.5 rounded text-xs font-mono font-medium shadow-xl ' +
+    (bad ? 'bg-[#ef4444] text-white' : 'bg-[#10b981] text-[#081510]');
+  t.classList.remove('hidden');
   clearTimeout(toast._t);
   toast._t = setTimeout(() => t.classList.add('hidden'), 2200);
 }
 
 /* ============================================================
-   PAN / ZOOM
+   PAN / ZOOM ENGINE
    ============================================================ */
-/* rámec mapy (sever nahoře) — 1 jednotka = 0,25 m */
 const FR = typeof SURROUND !== 'undefined' ? SURROUND.frame : { size: 1640, scale: 4 };
 const ctxBox = () => ({ x: 0, y: 0, w: FR.size, h: FR.size });
 
@@ -164,7 +161,6 @@ function applyView() {
   }
 }
 
-/* grafické měřítko — 1 světová jednotka = 0,25 m */
 const NICE = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000];
 function updateScale() {
   const bar = $('#scaleBar'); if (!bar) return;
@@ -183,6 +179,7 @@ function zoomAt(cx, cy, factor) {
   view.k = k2;
   applyView();
 }
+
 function fit(animate = true) {
   const f = floorOf(ui.floor), r = wrap.getBoundingClientRect();
   const b = fitBox(f);
@@ -191,6 +188,7 @@ function fit(animate = true) {
   k = Math.min(view.max, Math.max(view.min, k));
   animateTo((r.width - b.w * k) / 2 - b.x * k, (r.height - b.h * k) / 2 - b.y * k, k, animate);
 }
+
 function focusOn(v, mult = 3.2) {
   const g = v.geo; if (!g) return;
   const r = wrap.getBoundingClientRect();
@@ -198,6 +196,7 @@ function focusOn(v, mult = 3.2) {
     (r.width * 0.45) / Math.max(g.w, 1), (r.height * 0.45) / Math.max(g.h, 1), mult)));
   animateTo(r.width / 2 - (g.x + g.w / 2) * k, r.height / 2 - (g.y + g.h / 2) * k, k, true);
 }
+
 function ensureVisible(v, pad = 60) {
   const g = v.geo; if (!g) return;
   const r = wrap.getBoundingClientRect();
@@ -208,6 +207,7 @@ function ensureVisible(v, pad = 60) {
   if (y1 < pad) dy = pad - y1; else if (y2 > r.height - pad) dy = (r.height - pad) - y2;
   if (dx || dy) animateTo(view.x + dx, view.y + dy, view.k, true);
 }
+
 function animateTo(x, y, k, animate) {
   if (!animate) { view.x = x; view.y = y; view.k = k; return applyView(); }
   const s = { ...view }, t0 = performance.now(), D = 420;
@@ -221,7 +221,7 @@ function animateTo(x, y, k, animate) {
   })(t0);
 }
 
-/* --- ukazatel (myš + dotyk) --- */
+/* Ukazatel (myš + dotyk) */
 let drag = null, moved = 0;
 wrap.addEventListener('pointerdown', e => {
   if (e.button !== 0 && e.pointerType === 'mouse') return;
@@ -229,6 +229,7 @@ wrap.addEventListener('pointerdown', e => {
   moved = 0;
   wrap.setPointerCapture(e.pointerId);
 });
+
 wrap.addEventListener('pointermove', e => {
   if (!drag || drag.id !== e.pointerId) return;
   const dx = e.clientX - drag.px, dy = e.clientY - drag.py;
@@ -236,6 +237,7 @@ wrap.addEventListener('pointermove', e => {
   view.x = drag.ox + dx; view.y = drag.oy + dy;
   applyView();
 });
+
 const endDrag = e => { if (drag && drag.id === e.pointerId) drag = null; };
 wrap.addEventListener('pointerup', endDrag);
 wrap.addEventListener('pointercancel', endDrag);
@@ -271,6 +273,7 @@ wrap.addEventListener('touchstart', e => {
               cx: (a.clientX + b.clientX) / 2, cy: (a.clientY + b.clientY) / 2, x: view.x, y: view.y };
   }
 }, { passive: true });
+
 wrap.addEventListener('touchmove', e => {
   if (e.touches.length === 2 && pinch) {
     e.preventDefault();
@@ -285,6 +288,7 @@ wrap.addEventListener('touchmove', e => {
     applyView();
   }
 }, { passive: false });
+
 wrap.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; }, { passive: true });
 
 $('#zIn').onclick  = () => { const r = wrap.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1.4); };
@@ -308,7 +312,7 @@ addEventListener('keydown', e => {
 let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => fit(false), 150); });
 
 /* ============================================================
-   VYKRESLENÍ PŮDORYSU
+   VYKRESLENÍ PŮDORYSU A OKOLÍ
    ============================================================ */
 function el(name, attrs = {}, parent) {
   const n = document.createElementNS(SVGNS, name);
@@ -320,15 +324,12 @@ function el(name, attrs = {}, parent) {
 let labelNodes = [], markNodes = [], trackedNodes = [], ctxLabels = [];
 const UNIT_INFO = new WeakMap();
 
-/* ============================================================
-   OKOLÍ — geometrie z OpenStreetMap
-   ============================================================ */
 function fitBox(f) {
   const m = Math.max(f.bw, f.bh) * 0.11;
   return { x: f.bx - m, y: f.by - m, w: f.bw + 2 * m, h: f.bh + 2 * m };
 }
 
-const BLD_FILL = { com: '#1a2038', res: '#171d33', civ: '#1c2240', aux: '#12172a', gen: '#171d33' };
+const BLD_FILL = { com: '#101214', res: '#0d0f11', civ: '#141618', aux: '#0a0b0c', gen: '#101214' };
 
 function drawContext(parent) {
   if (typeof SURROUND === 'undefined') return;
@@ -338,41 +339,40 @@ function drawContext(parent) {
   const gg = el('g', { fill: '#13291b', stroke: '#1b3d27', 'stroke-width': 2 }, g);
   S.green.forEach(o => el('path', { d: o.d }, gg));
 
-  const gw = el('g', { fill: '#10273f', stroke: '#1b3d61', 'stroke-width': 2 }, g);
+  const gw = el('g', { fill: '#111516', stroke: '#252b2d', 'stroke-width': 2 }, g);
   S.water.forEach(o => el('path', { d: o.d }, gw));
 
-  const gp = el('g', { fill: '#151c32', stroke: '#222b4c', 'stroke-width': 2 }, g);
+  const gp = el('g', { fill: '#151718', stroke: '#292d2e', 'stroke-width': 2 }, g);
   S.parking.forEach(o => el('path', { d: o.d }, gp));
 
-  const cas = el('g', { fill: 'none', stroke: '#0e1428', 'stroke-linecap': 'round',
-                        'stroke-linejoin': 'round' }, g);
-  S.roads.filter(r => !r.f).forEach(r =>
-    el('path', { d: r.d, 'stroke-width': r.w + 5 }, cas));
-  const rd = el('g', { fill: 'none', stroke: '#222b4e', 'stroke-linecap': 'round',
-                       'stroke-linejoin': 'round' }, g);
+  const cas = el('g', { fill: 'none', stroke: '#0b0c0d', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, g);
+  S.roads.filter(r => !r.f).forEach(r => el('path', { d: r.d, 'stroke-width': r.w + 5 }, cas));
+  const rd = el('g', { fill: 'none', stroke: '#242829', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, g);
   S.roads.filter(r => !r.f).forEach(r => el('path', { d: r.d, 'stroke-width': r.w }, rd));
 
-  const fw = el('g', { fill: 'none', stroke: '#1b2440', 'stroke-width': 4,
-                       'stroke-dasharray': '10 7', 'stroke-linecap': 'round' }, g);
+  const fw = el('g', { fill: 'none', stroke: '#303536', 'stroke-width': 4, 'stroke-dasharray': '10 7', 'stroke-linecap': 'round' }, g);
   S.roads.filter(r => r.f).forEach(r => el('path', { d: r.d }, fw));
 
-  const rlBase = el('g', { fill: 'none', stroke: '#101830', 'stroke-width': 16,
-                           'stroke-linecap': 'round' }, g);
-  const rlTie = el('g', { fill: 'none', stroke: '#333f6b', 'stroke-width': 13,
-                          'stroke-dasharray': '3 9' }, g);
-  const rlTop = el('g', { fill: 'none', stroke: '#5b6c98', 'stroke-width': 2.2 }, g);
+  const rlBase = el('g', { fill: 'none', stroke: '#101213', 'stroke-width': 16, 'stroke-linecap': 'round' }, g);
+  const rlTie = el('g', { fill: 'none', stroke: '#343a3c', 'stroke-width': 13, 'stroke-dasharray': '3 9' }, g);
+  const rlTop = el('g', { fill: 'none', stroke: '#777f80', 'stroke-width': 2.2 }, g);
   S.rails.forEach(r => {
     el('path', { d: r.d }, rlBase);
     el('path', { d: r.d }, rlTie);
     el('path', { d: r.d, 'stroke-dasharray': r.t === 'tram' ? '14 10' : null }, rlTop);
   });
 
-  const gb = el('g', { stroke: '#2c3555', 'stroke-width': 2, 'stroke-linejoin': 'round' }, g);
-  S.buildings.forEach(b => el('path', { d: b.d, fill: BLD_FILL[b.k] || BLD_FILL.gen }, gb));
+  const gb = el('g', { stroke: '#353a3b', 'stroke-width': 2, 'stroke-linejoin': 'round' }, g);
+  S.buildings.forEach(b => {
+    const isOrganica = b.n === 'Organica';
+    const d = isOrganica
+      ? `${b.d}M722 1266a76 76 0 1 0 152 0a76 76 0 1 0-152 0Z`
+      : b.d;
+    el('path', { d, fill: BLD_FILL[b.k] || BLD_FILL.gen, 'fill-rule': isOrganica ? 'evenodd' : null }, gb);
+  });
 
   S.streets.forEach(s => {
-    const t = el('text', { class: 'ctx-lab', x: s.x, y: s.y, 'text-anchor': 'middle',
-                           transform: `rotate(${s.r} ${s.x} ${s.y})` }, g);
+    const t = el('text', { class: 'ctx-lab', x: s.x, y: s.y, 'text-anchor': 'middle', transform: `rotate(${s.r} ${s.x} ${s.y})` }, g);
     t.textContent = s.n;
     ctxLabels.push({ node: t, minK: 0.55 });
   });
@@ -395,8 +395,7 @@ function buildStatic() {
 
   const mall = typeof SURROUND !== 'undefined' && SURROUND.mall;
   if (mall) {
-    el('path', { d: mall.d, fill: '#212f5e', stroke: '#4f66ad', 'stroke-width': 3,
-                 'stroke-linejoin': 'round' }, g);
+    el('path', { d: mall.d, fill: '#171a1d', stroke: '#3a4148', 'stroke-width': 3, 'stroke-linejoin': 'round' }, g);
   }
   staticLayer = g;
   return g;
@@ -413,17 +412,14 @@ function buildFloorLayer(f) {
 
   const hasMall = typeof SURROUND !== 'undefined' && !!SURROUND.mall;
   if (isOutside(f)) {
-    const pad = el('g', { fill: '#2b3a6b', stroke: '#5e76c4', 'stroke-width': 9,
-                          'stroke-linejoin': 'round' }, g);
+    const pad = el('g', { fill: '#151719', stroke: '#343a40', 'stroke-width': 9, 'stroke-linejoin': 'round' }, g);
     f.units.forEach(u => el('path', { d: u.d }, pad));
   } else {
     if (!hasMall) {
-      const edge = el('g', { fill: '#4f66ad', stroke: '#4f66ad', 'stroke-width': 31,
-                             'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, g);
+      const edge = el('g', { fill: '#2a2e32', stroke: '#2a2e32', 'stroke-width': 31, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, g);
       f.units.forEach(u => el('path', { d: u.d }, edge));
     }
-    const slab = el('g', { fill: '#212f5e', stroke: '#212f5e', 'stroke-width': hasMall ? 14 : 26,
-                           'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, g);
+    const slab = el('g', { fill: '#171a1d', stroke: '#171a1d', 'stroke-width': hasMall ? 14 : 26, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, g);
     f.units.forEach(u => el('path', { d: u.d }, slab));
   }
 
@@ -431,8 +427,7 @@ function buildFloorLayer(f) {
   if (fcu.length) {
     let cx = 0, cy = 0;
     for (const u of fcu) { cx += u.lx; cy += u.ly; }
-    const t = el('text', { class: 'fc-title', x: cx / fcu.length, y: cy / fcu.length,
-                           'text-anchor': 'middle', fill: 'rgba(255,180,58,.34)', 'letter-spacing': 7 }, g);
+    const t = el('text', { class: 'fc-title', x: cx / fcu.length, y: cy / fcu.length, 'text-anchor': 'middle', fill: 'rgba(255,180,58,.34)', 'letter-spacing': 7 }, g);
     t.textContent = 'FOOD COURT';
   }
 
@@ -470,14 +465,17 @@ function drawFloor() {
 function drawUnit(u, parent, tracked) {
   const v = u.v ? venue(u.v) : null;
   const g = el('g', { class: 'unit' + (v ? ' tracked' : ''), 'data-poi': u.poi, 'data-v': u.v || null }, parent);
-  const sh = el('path', { class: 'u-shape', d: u.d,
-                          fill: v ? NOPE : (u.fc ? '#31302a' : KIND_FILL[u.k] || KIND_FILL.shop) }, g);
+  const sh = el('path', { class: 'u-shape', d: u.d, fill: v ? NOPE : (u.fc ? '#31302a' : KIND_FILL[u.k] || KIND_FILL.shop) }, g);
   UNIT_INFO.set(g, { u, v });
   if (v) tracked.push({ node: g, shape: sh, v });
 }
 
-const BADGE_H = 32;
-const BADGE_AR_MAX = 3.4;
+const MAP_LOGO_SCALE = {
+  mcdonalds: .64,
+  ugosalaterie: .72,
+  coloseum: .72,
+  kanteen: .68
+};
 
 function drawLabel(u, parent, labels, marks) {
   const v = u.v ? venue(u.v) : null;
@@ -491,39 +489,44 @@ function drawLabel(u, parent, labels, marks) {
 
   if (v) {
     const url = typeof logoUrl === 'function' ? logoUrl(v.id) : null;
-    const ar = url ? Math.min(BADGE_AR_MAX, Math.max(1, logoAspect(v.id))) : 1;
-    const bh = BADGE_H, bw = Math.round(bh * ar);
-    const hw = bw / 2, hh = bh / 2, pad = 3.5;
+    const ar = url ? Math.max(.45, Math.min(4.2, logoAspect(v.id))) : 1;
+    const rotate = ar > 1.7 && u.h > u.w * 1.15;
+    // Calculate the badge in the logo's natural orientation, then rotate it
+    // inside portrait-shaped units so it follows the unit's long axis.
+    const unitW = rotate ? u.h : u.w;
+    const unitH = rotate ? u.w : u.h;
+    const logoScale = MAP_LOGO_SCALE[v.id] || 1;
+    const maxW = Math.max(4, unitW * .92 * logoScale);
+    const maxH = Math.max(4, unitH * .84 * logoScale);
+    const bw = Math.min(maxW, maxH * ar);
+    const bh = Math.min(maxH, bw / ar);
+    const hw = bw / 2, hh = bh / 2, pad = Math.min(3.5, bw * .12, bh * .12);
 
     const mk = el('g', { class: 'mark' }, g);
-    const bg = el('rect', { class: 'm-bg', x: -hw, y: -hh, width: bw, height: bh,
-                            rx: Math.min(9, hh), fill: '#fff', stroke: NOPE, 'stroke-width': 3 }, mk);
+    const bg = el('rect', { class: 'm-bg', x: -hw, y: -hh, width: bw, height: bh, rx: Math.min(9, hh), fill: '#fff', stroke: NOPE, 'stroke-width': 3 }, mk);
     if (url) {
-      el('image', { class: 'm-logo', href: url, x: -hw + pad, y: -hh + pad,
-                    width: bw - 2 * pad, height: bh - 2 * pad,
-                    preserveAspectRatio: 'xMidYMid meet', decoding: 'async' }, mk);
+      el('image', { class: `m-logo logo-${v.id}`, href: url, x: -hw + pad, y: -hh + pad, width: Math.max(1, bw - 2 * pad), height: Math.max(1, bh - 2 * pad), preserveAspectRatio: 'xMidYMid meet', decoding: 'async' }, mk);
     } else {
-      const ic = el('text', { class: 'm-ic', y: 5, 'text-anchor': 'middle', 'font-size': 15 }, mk);
-      ic.textContent = cat(v.cat).icon;
+      const word = v.id === 'kanteen' ? 'KANTEEN' : v.id === 'frankiespub' ? "FRANKIE'S" : cat(v.cat).icon;
+      const ic = el('text', { class: `m-ic ${v.id === 'kanteen' || v.id === 'frankiespub' ? 'm-word' : ''}`, y: 5, 'text-anchor': 'middle', 'font-size': v.id === 'kanteen' || v.id === 'frankiespub' ? 8 : 15 }, mk);
+      ic.textContent = word;
     }
     const ck = el('g', { class: 'm-ck', display: 'none' }, mk);
     el('circle', { r: 7.4, cx: hw - 1, cy: -hh + 1, fill: YES, stroke: '#fff', 'stroke-width': 1.8 }, ck);
-    el('path', { d: `M${hw - 4.4} ${-hh + 0.8} L${hw - 1.9} ${-hh + 3.4} L${hw + 2.6} ${-hh - 2.2}`,
-                 fill: 'none', stroke: '#fff', 'stroke-width': 2.2,
-                 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, ck);
+    el('path', { d: `M${hw - 4.4} ${-hh + 0.8} L${hw - 1.9} ${-hh + 3.4} L${hw + 2.6} ${-hh - 2.2}`, fill: 'none', stroke: '#fff', 'stroke-width': 2.2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, ck);
 
-    const maxS = Math.max(0.55, Math.min(u.w * 0.95 / bw, u.h * 0.95 / bh));
-    marks.push({ node: mk, wrap: g, bg, ck, v, maxS, last: -1 });
+    const maxS = 1;
+    marks.push({ node: mk, wrap: g, bg, ck, v, maxS, rotate, last: -1 });
     UNIT_INFO.set(mk, { u, v });
     base = hh + 13;
   }
 
-  const t = el('text', { class: 'u-label' + (v ? ' is-v' : ''), y: base, 'text-anchor': 'middle',
-                         fill: v ? '#f8fafc' : '#9fb0d0' }, g);
-  const name = v ? v.name : u.n;
-  t.textContent = name.length > 26 ? name.slice(0, 25) + '…' : name;
-
-  labels.push({ node: g, lab: t, minK, base, shown: null, last: -1 });
+  if (!v) {
+    const t = el('text', { class: 'u-label', y: base, 'text-anchor': 'middle', fill: '#9fb0d0' }, g);
+    const name = u.n;
+    t.textContent = name.length > 26 ? name.slice(0, 25) + '…' : name;
+    labels.push({ node: g, lab: t, minK, base, shown: null, last: -1 });
+  }
 }
 
 let lastLOD = -1, lastCtxLOD = -1;
@@ -539,8 +542,9 @@ function updateLOD(force) {
   s.setProperty('--sw', (1.1 / k).toFixed(3));
 
   for (const m of markNodes) {
-    const sc = +Math.min(1 / k, m.maxS).toFixed(3);
-    if (sc !== m.last) { m.node.setAttribute('transform', `scale(${sc})`); m.last = sc; }
+    const sc = +Math.min(1, m.maxS).toFixed(3);
+    const transform = `${m.rotate ? 'rotate(90) ' : ''}scale(${sc})`;
+    if (transform !== m.last) { m.node.setAttribute('transform', transform); m.last = transform; }
   }
   for (const l of labelNodes) {
     const show = k >= l.minK || l.node.classList.contains('force');
@@ -559,23 +563,23 @@ function updateLOD(force) {
   lastLOD = k;
 }
 
-/* ---------- tooltip ---------- */
+/* Tooltip */
 function showTip(e, u, v) {
   const t = $('#tip');
   if (v) {
     const r = rec(v.id), c = cat(v.cat);
-    t.innerHTML = `<b>${esc(v.name)}</b> <span class="text-slate-400">· ${c.icon} ${c.label}</span>` +
-      (r.visited ? ` <span class="text-emerald-400">✓</span>` : '') +
-      `<br><span class="text-slate-400">${esc(v.desc)}</span>`;
+    t.innerHTML = `<div class="font-semibold text-white flex items-center gap-1.5"><span class="w-2 h-2 rounded-full ${r.visited ? 'bg-[#10b981]' : 'bg-[#ef4444]'}"></span>${esc(v.name)} <span class="text-[#717886] font-normal">· ${c.label}</span></div>` +
+      `<div class="text-[11px] text-[#9ca3af] mt-0.5">${esc(v.desc || '')}</div>`;
   } else {
     if (!u.n) return;
-    t.innerHTML = `<span class="text-slate-300">${esc(u.n)}</span>` +
-      (u.k === 'vert' ? ' <span class="text-slate-500">· schody / výtah</span>' :
-       u.k === 'service' ? ' <span class="text-slate-500">· služby centra</span>' : '');
+    t.innerHTML = `<span class="text-[#cbd0dc] font-mono">${esc(u.n)}</span>` +
+      (u.k === 'vert' ? ' <span class="text-[#525866]">· schody / výtah</span>' :
+       u.k === 'service' ? ' <span class="text-[#525866]">· služby</span>' : '');
   }
   t.classList.remove('hidden');
   moveTip(e);
 }
+
 function moveTip(e) {
   const t = $('#tip'), r = wrap.getBoundingClientRect();
   let x = e.clientX - r.left + 14, y = e.clientY - r.top + 14;
@@ -609,7 +613,7 @@ vp.addEventListener('pointerout', e => {
 vp.addEventListener('pointermove', e => { if (hoverUnit) moveTip(e); });
 
 /* ============================================================
-   FILTRY
+   FILTROVÁNÍ & SYNCHRONIZACE MAPY
    ============================================================ */
 function matches(v) {
   if (ui.filter === 'visited' && !isVisited(v.id)) return false;
@@ -617,7 +621,7 @@ function matches(v) {
   if (ui.cats.size && !ui.cats.has(v.cat)) return false;
   if (ui.q) {
     const q = ui.q.toLowerCase();
-    if (!(v.name + ' ' + v.desc + ' ' + (v.tags || []).join(' ') + ' ' + cat(v.cat).label).toLowerCase().includes(q)) return false;
+    if (!(v.name + ' ' + (v.desc || '') + ' ' + (v.tags || []).join(' ') + ' ' + cat(v.cat).label).toLowerCase().includes(q)) return false;
   }
   return true;
 }
@@ -650,13 +654,13 @@ function refreshMap() {
 }
 
 /* ============================================================
-   SEZNAM
+   SEZNAM A DETAILNÍ PANEL (CAD UI)
    ============================================================ */
 function renderChips() {
   const used = [...new Set(VENUES.map(v => v.cat))];
   $('#catChips').innerHTML = used.map(c => {
     const o = cat(c), n = VENUES.filter(v => v.cat === c).length;
-    return `<button class="chip ${ui.cats.has(c) ? 'on' : ''}" data-cat="${c}">${o.icon} ${esc(o.label)} <span class="opacity-50">${n}</span></button>`;
+    return `<button class="chip ${ui.cats.has(c) ? 'on' : ''}" data-cat="${c}">${esc(o.label)} <span class="font-mono text-[9px] opacity-60">${n}</span></button>`;
   }).join('');
   $$('#catChips .chip').forEach(b => b.onclick = () => {
     const c = b.dataset.cat;
@@ -670,31 +674,32 @@ function renderList() {
   const byFloor = {};
   items.forEach(v => (byFloor[v.floor] ||= []).push(v));
 
-  let html = items.length ? '' : `<div class="text-center text-slate-500 text-sm py-10">Nic nenalezeno 🤷</div>`;
+  let html = items.length ? '' : `<div class="text-center text-[#525866] font-mono text-xs py-8">Žádná jednotka nenalezena</div>`;
 
   FLOORS.forEach(f => {
     const arr = byFloor[f.id];
     if (!arr) return;
     const done = arr.filter(v => isVisited(v.id)).length;
-    html += `<div class="px-1.5 pt-2 pb-1 flex items-center justify-between sticky top-0 bg-ink-800 z-10">
-        <span class="text-[11px] uppercase tracking-wider text-slate-400 font-bold">${esc(f.name)}</span>
-        <span class="text-[11px] text-slate-500">${done}/${arr.length}</span></div>`;
+    html += `<div class="px-2 pt-2 pb-1 flex items-center justify-between sticky top-0 bg-[#101217] z-10 border-b border-[#1b1e26]">
+        <span class="text-[10px] font-mono uppercase tracking-wider text-[#737a87] font-semibold">${esc(f.name)}</span>
+        <span class="text-[10px] font-mono text-[#525866]">${done}/${arr.length}</span></div>`;
+
     html += arr.map(v => {
-      const r = rec(v.id), c = cat(v.cat), on = r.visited;
-      return `<div class="row-card group flex items-center gap-2.5 p-2 rounded-xl border cursor-pointer
-                  ${ui.sel === v.id ? 'bg-brand-500/15 border-brand-500/60' : on ? 'bg-emerald-500/10 border-emerald-500/25 hover:bg-emerald-500/15' : 'bg-white/[.03] border-white/10 hover:bg-white/[.07]'}"
+      const r = rec(v.id), on = r.visited;
+      return `<div class="row-card flex items-center gap-2.5 px-2 py-1.5 rounded border cursor-pointer
+                  ${ui.sel === v.id ? 'bg-[#18202e] border-[#384860]' : on ? 'bg-[#101918] border-[#183126]' : 'bg-[#14171e]/70 border-[#1f222b]'}"
                   data-go="${v.id}">
-          <button data-tog="${v.id}" title="Označit jako navštívené"
-            class="shrink-0 w-6 h-6 rounded-lg grid place-items-center border-2 transition
-            ${on ? 'bg-emerald-500 border-emerald-500 text-slate-900' : 'border-white/25 text-transparent hover:border-brand-400'}">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="3.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7"/></svg>
+          <button data-tog="${v.id}" title="${on ? 'Zrušit označení' : 'Označit jako navštívené'}"
+            class="shrink-0 w-4 h-4 rounded border grid place-items-center transition
+            ${on ? 'bg-[#10b981] border-[#10b981] text-[#091510]' : 'border-[#363a48] bg-transparent text-transparent hover:border-[#10b981]'}">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7"/></svg>
           </button>
-          <span class="w-8 h-8 shrink-0 rounded-lg bg-white grid place-items-center overflow-hidden p-1">${logoMarkup(v, 'max-w-full max-h-full')}</span>
+          <span class="logo-surface w-7 h-7 shrink-0 rounded border grid place-items-center overflow-hidden p-1">${logoMarkup(v, 'max-w-full max-h-full')}</span>
           <div class="min-w-0 flex-1">
-            <div class="text-[13px] font-semibold truncate ${on ? 'text-emerald-300' : ''}">${esc(v.name)}${v.fc ? ' <span class="text-brand-400 text-[10px] align-middle">FC</span>' : ''}</div>
-            <div class="text-[11px] text-slate-400 truncate">${esc(v.desc)}</div>
+            <div class="text-xs font-medium truncate ${on ? 'text-[#e2e4e9]' : 'text-[#cbd0dc]'}">${esc(v.name)}${v.fc ? ' <span class="text-[#10b981] font-mono text-[9px] align-middle">FC</span>' : ''}</div>
+            <div class="text-[10px] text-[#636b78] truncate font-mono">${esc(v.desc || cat(v.cat).label)}</div>
           </div>
-          ${r.rating ? `<span class="text-[11px] text-amber-400 shrink-0">${'★'.repeat(r.rating)}</span>` : ''}
+          ${r.rating ? `<span class="text-[10px] text-[#fbbf24] font-mono shrink-0">${'★'.repeat(r.rating)}</span>` : ''}
         </div>`;
     }).join('');
   });
@@ -721,9 +726,8 @@ function renderFloors() {
   $('#floorBar').innerHTML = FLOORS.filter(f => !isOutside(f)).map(f => {
     const arr = VENUES.filter(v => v.floor === f.id);
     const done = arr.filter(v => isVisited(v.id)).length;
-    return `<button data-f="${f.id}" class="px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0
-      ${ui.floor === f.id ? 'bg-gradient-to-r from-brand-400 to-brand-600 text-slate-900' : 'text-slate-300 hover:bg-white/10'}">
-      ${esc(f.short)}${arr.length ? ` <span class="opacity-60 font-normal">${done}/${arr.length}</span>` : ''}</button>`;
+    return `<button data-f="${f.id}" class="floor-tab ${ui.floor === f.id ? 'active' : ''}">
+      ${esc(f.short)}${arr.length ? ` <span class="opacity-60 text-[10px]">${done}/${arr.length}</span>` : ''}</button>`;
   }).join('');
   $$('#floorBar [data-f]').forEach(b => b.onclick = () => {
     if (ui.floor === b.dataset.f) return;
@@ -756,57 +760,62 @@ function renderDetail() {
   if (innerWidth < 1024) closeSidebar();
 
   p.innerHTML = `
-    <div class="p-4 border-b border-white/10 flex items-start gap-3">
-      <div class="w-11 h-11 rounded-xl grid place-items-center text-xl shrink-0 overflow-hidden p-1.5" style="background:${c.color}33;border:1px solid ${c.color}66">${logoMarkup(v, 'max-w-full max-h-full')}</div>
+    <div class="p-3.5 border-b border-[#20232b] flex items-start gap-3">
+      <div class="logo-surface w-10 h-10 rounded border grid place-items-center shrink-0 overflow-hidden p-1.5">${logoMarkup(v, 'max-w-full max-h-full')}</div>
       <div class="min-w-0 flex-1">
-        <h2 class="font-extrabold text-[17px] leading-tight break-words">${esc(v.name)}</h2>
-        <p class="text-xs text-slate-400 mt-0.5">${esc(c.label)} · ${esc(f.name)}${v.fc ? ' · <span class="text-brand-400 font-semibold">food court</span>' : ''}</p>
+        <h2 class="font-semibold text-sm leading-tight text-white">${esc(v.name)}</h2>
+        <p class="text-[11px] font-mono text-[#717886] mt-0.5">${esc(c.label)} · ${esc(f.name)}${v.fc ? ' · <span class="text-[#10b981]">FC</span>' : ''}</p>
       </div>
-      <button id="dClose" class="p-1.5 rounded-lg hover:bg-white/10 shrink-0">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
+      <button id="dClose" class="p-1 rounded text-[#717886] hover:text-white transition">✕</button>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-4 space-y-4 scroll-thin">
-      <p class="text-sm text-slate-300 leading-relaxed">${esc(v.desc)}</p>
-      ${v.tags?.length ? `<div class="flex flex-wrap gap-1.5">${v.tags.map(t => `<span class="chip cursor-default">${esc(t)}</span>`).join('')}</div>` : ''}
+    <div class="flex-1 overflow-y-auto p-3.5 space-y-3.5 scroll-thin text-xs">
+      <p class="text-[#9ca3af] leading-relaxed">${esc(v.desc || '')}</p>
+      ${v.tags?.length ? `<div class="flex flex-wrap gap-1">${v.tags.map(t => `<span class="chip cursor-default">${esc(t)}</span>`).join('')}</div>` : ''}
 
-      <button id="dTog" class="w-full py-3 rounded-xl font-bold text-sm transition flex items-center justify-center gap-2
-        ${r.visited ? 'bg-emerald-500 text-slate-900 hover:bg-emerald-400' : 'bg-white/10 hover:bg-white/20 border border-white/15'}">
-        ${r.visited ? '✓ Navštíveno' : 'Označit jako navštívené'}
+      <div class="visit-status ${r.visited ? 'is-visited' : 'is-pending'}">
+        <span class="visit-dot"></span>
+        <span>${r.visited ? 'Podnik je označený jako navštívený' : 'Podnik zatím není navštívený'}</span>
+      </div>
+      <button id="dTog" class="visit-action">
+        ${r.visited ? 'Zrušit označení návštěvy' : 'Označit jako navštívené'}
       </button>
 
-      <div class="${r.visited ? '' : 'opacity-40 pointer-events-none'} space-y-4">
-        <div>
-          <label class="text-xs text-slate-400 font-semibold">Hodnocení</label>
-          <div id="stars" class="flex gap-1 mt-1.5 text-2xl leading-none">
-            ${[1,2,3,4,5].map(i => `<button data-s="${i}" class="transition hover:scale-125 ${i <= r.rating ? 'text-amber-400' : 'text-slate-600 hover:text-amber-300'}">★</button>`).join('')}
-            ${r.rating ? `<button data-s="0" class="ml-1.5 text-xs text-slate-500 hover:text-rose-400 self-center">zrušit</button>` : ''}
+      <div class="${r.visited ? '' : 'opacity-35 pointer-events-none'} space-y-3 border-t border-[#1e212a] pt-3">
+        <div class="rating-card">
+          <div class="flex items-center justify-between gap-3">
+            <label class="text-[11px] font-mono uppercase tracking-wider">Hodnocení návštěvy</label>
+            <output id="ratingValue" class="rating-value">${r.rating ? `${r.rating}/5` : 'Bez hodnocení'}</output>
+          </div>
+          <div id="stars" class="flex items-center gap-1.5 mt-2 leading-none" aria-label="Vyberte hodnocení od jedné do pěti hvězd">
+            ${[1,2,3,4,5].map(i => `<button type="button" data-s="${i}" aria-label="${i} z 5 hvězd" class="rating-star ${i <= r.rating ? 'is-active' : ''}">★</button>`).join('')}
+            ${r.rating ? `<button type="button" data-s="0" class="rating-reset">Smazat</button>` : ''}
           </div>
         </div>
         <div>
-          <label class="text-xs text-slate-400 font-semibold">Datum návštěvy</label>
+          <label class="text-[11px] font-mono text-[#717886] uppercase tracking-wider">Datum</label>
           <input id="dDate" type="date" value="${r.date || ''}"
-            class="mt-1.5 w-full bg-ink-900 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/60">
+            class="mt-1 w-full bg-[#14171f] border border-[#232733] rounded px-2.5 py-1.5 text-xs text-[#e2e4e9] focus:outline-none focus:border-[#10b981] font-mono">
         </div>
         <div>
-          <label class="text-xs text-slate-400 font-semibold">Poznámka</label>
-          <textarea id="dNote" rows="4" placeholder="Co jsem si dal, jaké to bylo…"
-            class="mt-1.5 w-full bg-ink-900 border border-white/10 rounded-xl px-3 py-2 text-sm resize-none placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-brand-500/60">${esc(r.note)}</textarea>
+          <label class="text-[11px] font-mono text-[#717886] uppercase tracking-wider">Poznámka</label>
+          <textarea id="dNote" rows="3" placeholder="Záznam návštěvy…"
+            class="mt-1 w-full bg-[#14171f] border border-[#232733] rounded px-2.5 py-1.5 text-xs text-[#e2e4e9] resize-none focus:outline-none focus:border-[#10b981]">${esc(r.note)}</textarea>
         </div>
       </div>
-      <p class="text-[11px] text-slate-500 pt-1">Jednotka <code class="text-slate-400">${esc(v.poi)}</code> podle oficiální navigace centra.</p>
+      <div class="font-mono text-[10px] text-[#525866] pt-1">ID jednotky: <span class="text-[#8c93a0]">${esc(v.poi || v.id)}</span></div>
     </div>
 
-    <div class="p-3 border-t border-white/10">
-      <button id="dFocus" class="w-full py-2 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 border border-white/10 transition">🔍 Přiblížit na mapě</button>
+    <div class="p-2.5 border-t border-[#20232b]">
+      <button id="dFocus" class="w-full py-1.5 rounded font-mono text-[11px] text-[#9ca3af] hover:text-white bg-[#14171f] border border-[#232733] hover:border-[#353a4a] transition">ZAMĚŘIT NA MAPĚ</button>
     </div>`;
 
   $('#dClose').onclick = () => select(null);
   $('#dTog').onclick = () => toggle(v.id);
   $('#dFocus').onclick = () => focusOn(v, 5);   $$('#stars [data-s]').forEach(b => b.onclick = () => { rec(v.id).rating = +b.dataset.s; save(v.id); renderDetail(); renderList(); });
   $('#dDate').onchange = e => { rec(v.id).date = e.target.value || null; save(v.id); };
-  let nt; $('#dNote').oninput = e => { clearTimeout(nt); nt = setTimeout(() => { rec(v.id).note = e.target.value; save(v.id); }, 350); };
+  let nt;
+  $('#dNote').oninput = e => { clearTimeout(nt); nt = setTimeout(() => { rec(v.id).note = e.target.value; save(v.id); }, 300); };
 }
 
 function toggle(id) {
@@ -818,13 +827,13 @@ function toggle(id) {
   const v = venue(id);
   if (r.visited) {
     const done = VENUES.filter(x => isVisited(x.id)).length;
-    toast(done === VENUES.length ? '🏆 Všechno hotovo! Gratuluju!' : `✓ ${v.name} — hotovo! (${done}/${VENUES.length})`);
+    toast(`${v.name} ✓ (${done}/${VENUES.length})`);
   }
   renderAll();
 }
 
 /* ============================================================
-   MODÁLY
+   MODÁLY (DATA & EXPORT)
    ============================================================ */
 const closeModal = () => $('#modal').classList.add('hidden');
 function openModal(html) {
@@ -839,60 +848,67 @@ $('#btnStats').onclick = () => {
   const byCat = {};
   VENUES.forEach(v => { byCat[v.cat] ||= { t: 0, d: 0 }; byCat[v.cat].t++; if (isVisited(v.id)) byCat[v.cat].d++; });
   const fcAll = VENUES.filter(v => v.fc), fcDone = fcAll.filter(v => isVisited(v.id)).length;
-  const top = [...rated].sort((a, b) => rec(b.id).rating - rec(a.id).rating).slice(0, 5);
 
   openModal(`
-    <div class="p-5 space-y-4">
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-extrabold">📊 Statistiky</h2>
-        <button data-close class="p-1.5 rounded-lg hover:bg-white/10">✕</button>
+    <div class="p-4 space-y-4">
+      <div class="flex items-center justify-between border-b border-[#222530] pb-2.5">
+        <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-white">Přehled dat</h2>
+        <button data-close class="text-[#717886] hover:text-white text-sm">✕</button>
       </div>
+
       <div class="grid grid-cols-3 gap-2 text-center">
-        <div class="bg-white/5 rounded-xl p-3"><div class="text-2xl font-extrabold text-emerald-400">${done.length}</div><div class="text-[11px] text-slate-400">navštíveno</div></div>
-        <div class="bg-white/5 rounded-xl p-3"><div class="text-2xl font-extrabold text-slate-300">${VENUES.length - done.length}</div><div class="text-[11px] text-slate-400">zbývá</div></div>
-        <div class="bg-white/5 rounded-xl p-3"><div class="text-2xl font-extrabold text-amber-400">${avg}</div><div class="text-[11px] text-slate-400">prům. hodnocení</div></div>
-      </div>
-      <div class="bg-brand-500/10 border border-brand-500/30 rounded-xl p-3 flex items-center justify-between">
-        <span class="text-sm font-semibold text-brand-400">🍔 Samotný food court</span>
-        <span class="text-sm tabular-nums"><b>${fcDone}</b><span class="text-slate-400">/${fcAll.length}</span></span>
-      </div>
-      <div>
-        <h3 class="text-xs uppercase tracking-wider text-slate-400 font-bold mb-2">Podle kategorie</h3>
-        <div class="space-y-1.5">
-          ${Object.entries(byCat).sort((a, b) => b[1].t - a[1].t).map(([c, o]) => {
-            const k = cat(c), p = Math.round(o.d / o.t * 100);
-            return `<div class="flex items-center gap-2 text-xs">
-              <span class="w-32 shrink-0 truncate">${k.icon}${esc(k.label)}</span>
-              <div class="flex-1 h-2 rounded-full bg-white/10 overflow-hidden"><div class="h-full rounded-full" style="width:${p}\%;background:${k.color}"></div></div>
-              <span class="w-11 text-right tabular-nums text-slate-400">${o.d}/${o.t}</span></div>`;
-          }).join('')}
+        <div class="bg-[#151821] border border-[#222530] rounded p-2.5">
+          <div class="text-xl font-mono font-bold text-[#10b981]">${done.length}</div>
+          <div class="text-[10px] font-mono text-[#636b78] uppercase mt-0.5">Navštíveno</div>
+        </div>
+        <div class="bg-[#151821] border border-[#222530] rounded p-2.5">
+          <div class="text-xl font-mono font-bold text-[#9ca3af]">${VENUES.length - done.length}</div>
+          <div class="text-[10px] font-mono text-[#636b78] uppercase mt-0.5">Zbývá</div>
+        </div>
+        <div class="bg-[#151821] border border-[#222530] rounded p-2.5">
+          <div class="text-xl font-mono font-bold text-[#fbbf24]">${avg}</div>
+          <div class="text-[10px] font-mono text-[#636b78] uppercase mt-0.5">Průměr ★</div>
         </div>
       </div>
-      ${top.length ? `<div>
-        <h3 class="text-xs uppercase tracking-wider text-slate-400 font-bold mb-2">Nejlépe hodnocené</h3>
-        <div class="space-y-1">${top.map(v => `<div class="flex justify-between text-xs bg-white/5 rounded-lg px-2.5 py-1.5">
-          <span>${cat(v.cat).icon} ${esc(v.name)}</span><span class="text-amber-400">${'★'.repeat(rec(v.id).rating)}</span></div>`).join('')}</div>
-      </div>` : ''}
+
+      <div class="bg-[#151821] border border-[#222530] rounded p-2.5 flex items-center justify-between text-xs font-mono">
+        <span class="text-[#9ca3af]">FOOD COURT ZÓNA</span>
+        <span class="text-white"><b>${fcDone}</b> <span class="text-[#525866]">/ ${fcAll.length}</span></span>
+      </div>
+
+      <div class="space-y-1.5 border-t border-[#222530] pt-3">
+        <div class="text-[10px] font-mono uppercase tracking-wider text-[#717886] mb-1">Kategorie</div>
+        ${Object.entries(byCat).sort((a, b) => b[1].t - a[1].t).map(([c, o]) => {
+          const k = cat(c), p = Math.round(o.d / o.t * 100);
+          return `<div class="flex items-center gap-2 text-xs font-mono">
+            <span class="w-28 shrink-0 truncate text-[#9ca3af]">${esc(k.label)}</span>
+            <div class="flex-1 h-1.5 bg-[#1b1e28] rounded-full overflow-hidden border border-[#242734]">
+              <div class="h-full bg-[#10b981]" style="width:${p}%"></div>
+            </div>
+            <span class="w-10 text-right text-[11px] text-[#636b78]">${o.d}/${o.t}</span>
+          </div>`;
+        }).join('')}
+      </div>
     </div>`);
 };
 
 $('#btnMenu').onclick = () => openModal(`
-  <div class="p-5 space-y-3">
-    <div class="flex items-center justify-between">
-      <h2 class="text-lg font-extrabold">Nastavení a data</h2>
-      <button data-close class="p-1.5 rounded-lg hover:bg-white/10">✕</button>
+  <div class="p-4 space-y-3 font-sans">
+    <div class="flex items-center justify-between border-b border-[#222530] pb-2.5">
+      <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-white">Správa dat</h2>
+      <button data-close class="text-[#717886] hover:text-white text-sm">✕</button>
     </div>
-    <p class="text-xs text-slate-400">Veškerý postup je sdílen v centrální databázi a zálohován v prohlížeči (localStorage).</p>
-    <div class="grid grid-cols-2 gap-2">
-      <button id="mExport" class="py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-sm font-semibold border border-white/10">⬇️ Export JSON</button>
-      <button id="mImport" class="py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-sm font-semibold border border-white/10">⬆️ Import JSON</button>
+    
+    <div class="grid grid-cols-2 gap-2 font-mono text-xs">
+      <button id="mExport" class="py-2 rounded bg-[#161922] hover:bg-[#1e222e] text-[#9ca3af] hover:text-white border border-[#262a36] transition">Export JSON</button>
+      <button id="mImport" class="py-2 rounded bg-[#161922] hover:bg-[#1e222e] text-[#9ca3af] hover:text-white border border-[#262a36] transition">Import JSON</button>
     </div>
-    <button id="mAll" class="w-full py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-sm font-semibold border border-emerald-500/30">✓ Označit vše jako navštívené</button>
-    <button id="mClear" class="w-full py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-sm font-semibold border border-rose-500/30">🗑️ Vymazat veškerý postup</button>
-    <div class="pt-2 border-t border-white/10 text-[11px] text-slate-500 space-y-1">
-      <p><b class="text-slate-400">Ovládání mapy:</b> kolečko = zoom · tažení = posun · dvojklik na mapu = přiblížit · dvojklik na podnik = odškrtnout</p>
-      <p><b class="text-slate-400">Klávesy:</b> + − 0 · šipky · / hledat · Esc zavřít</p>
-      <p class="pt-1">Půdorys, obrysy jednotek i patra pocházejí z <b class="text-slate-400">oficiální interaktivní mapy centra</b> (forumnovakarolina.cz/mapa-centra). Gastro podniky jsou zvýrazněny barevně, zóna food courtu oranžovou plochou.</p>
+
+    <button id="mAll" class="w-full py-2 rounded bg-[#10b981]/10 hover:bg-[#10b981]/20 text-[#10b981] text-xs font-mono border border-[#10b981]/30 transition">Označit všechny jednotky</button>
+    <button id="mClear" class="w-full py-2 rounded bg-[#ef4444]/10 hover:bg-[#ef4444]/20 text-[#ef4444] text-xs font-mono border border-[#ef4444]/30 transition">Resetovat všechny záznamy</button>
+
+    <div class="pt-2 border-t border-[#222530] text-[10px] font-mono text-[#525866] space-y-1">
+      <p>Kolečko = zoom · Táhnout = posun · Klik = detail · Dvojklik = stav</p>
     </div>
   </div>`);
 
@@ -905,7 +921,7 @@ document.addEventListener('click', e => {
     a.href = URL.createObjectURL(blob);
     a.download = `foodcourt-karolina-${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(a.href);
-    toast('Exportováno ⬇️');
+    toast('Exportováno');
   }
   if (t.id === 'mImport') {
     const i = document.createElement('input');
@@ -936,14 +952,10 @@ document.addEventListener('click', e => {
     save(); renderAll(); closeModal();
   }
   if (t.id === 'mClear' || t.id === 'btnReset') {
-    if (!confirm('Opravdu vymazat celý postup? Tuto akci nelze vrátit.')) return;
+    if (!confirm('Opravdu vymazat celý postup?')) return;
     const oldKeys = Object.keys(state.venues);
     state = { venues: {} };
-    save();
-    ui.sel = null;
-    renderAll();
-    closeModal();
-    toast('Vymazáno');
+    save(); ui.sel = null; renderAll(); closeModal(); toast('Vymazáno');
     oldKeys.forEach(id => syncVenueToServer(id));
   }
 });
@@ -967,5 +979,5 @@ renderAll();
 fit(false);
 syncAllFromServer();
 window.addEventListener('focus', syncAllFromServer);
-console.log(`🍽️ Food Court Tracker · ${VENUES.length} podniků · ${FLOORS.length} pater · ${FLOORS.reduce((s, f) => s + f.units.length, 0)} jednotek půdorysu`);
+
 })();

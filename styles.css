@@ -1,43 +1,93 @@
-/* Doplňky k Tailwindu */
+/* ============================================================
+   ARCHITECTURAL & MINIMAL DARK THEME
+   Kompletní zachování původních mapových stylů + moderní UI.
+   ============================================================ */
 
-.scroll-thin { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
-.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
-.scroll-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 99px; }
+/* Scrollbary */
+.scroll-thin { scrollbar-width: thin; scrollbar-color: #242834 transparent; }
+.scroll-thin::-webkit-scrollbar { width: 5px; height: 5px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #242834; border-radius: 2px; }
 .scroll-thin::-webkit-scrollbar-track { background: transparent; }
 
+/* Tlačítka mapy */
 .zbtn {
-  width: 2.25rem; height: 2.25rem;
+  width: 2rem; height: 2rem;
   display: grid; place-items: center;
-  border-radius: .75rem;
-  background: rgba(17,24,48,.9);
-  border: 1px solid rgba(255,255,255,.1);
-  color: #e2e8f0;
-  font-size: 1.15rem; font-weight: 700; line-height: 1;
-  backdrop-filter: blur(6px);
-  box-shadow: 0 6px 18px rgba(0,0,0,.35);
-  transition: background .15s, transform .12s;
+  border-radius: 4px;
+  background: rgba(16, 18, 24, 0.9);
+  border: 1px solid #252833;
+  color: #e2e4e9;
+  font-size: 1rem; font-weight: 600; line-height: 1;
+  transition: all .12s ease;
 }
-.zbtn:hover { background: rgba(36,48,85,.95); }
-.zbtn:active { transform: scale(.93); }
+.zbtn:hover { background: #1a1e27; border-color: #373c4d; }
+.zbtn:active { transform: scale(0.96); }
 
+/* Filtry (Vše / Zbývá / Hotovo) */
 .flt.on {
-  background: linear-gradient(to right, #ffb43a, #ff9500);
-  color: #1a1206; border-color: transparent; font-weight: 700;
+  background: #1f232c;
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(0,0,0,.4);
+  font-weight: 600;
 }
 
+/* Kategorie */
 .chip {
-  padding: .2rem .55rem; border-radius: 99px; font-size: 11px;
-  border: 1px solid rgba(255,255,255,.12);
-  display: inline-flex; align-items: center; gap: .3rem;
-  transition: all .15s; cursor: pointer; line-height: 1.4;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: #14161d;
+  border: 1px solid #20242e;
+  color: #8c93a0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all .12s ease;
+  cursor: pointer;
 }
-.chip:hover { background: rgba(255,255,255,.08); }
-.chip.on { background: rgba(255,180,58,.16); border-color: #ffb43a; color: #ffd08a; }
+.chip:hover {
+  background: #1a1d26;
+  border-color: #2c313e;
+  color: #e2e4e9;
+}
+.chip.on {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
 
-/* ===================== MAPA ===================== */
+/* Řádky seznamu */
+.row-card {
+  transition: background .12s ease, border-color .12s ease;
+}
+.row-card:hover {
+  background: #161921 !important;
+  border-color: #2b303e !important;
+}
+
+/* Tlačítka pater na mapě */
+.floor-tab {
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  transition: all .12s ease;
+  color: #8c93a0;
+}
+.floor-tab:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.06);
+}
+.floor-tab.active {
+  background: #10b981;
+  color: #081510;
+  font-weight: 700;
+}
+
+/* ===================== MAPA (ORIGINÁLNÍ PRAVIDLA) ===================== */
 #viewport { transform-origin: 0 0; --fs: 11px; --fs-big: 26px; --fs-ctx: 11px; --fs-ctx-big: 15px; --sw: 1; }
 
-/* okolí centra */
+/* Okolí centra (OpenStreetMap) */
 .ctx { pointer-events: none; }
 .ctx-lab {
   font-size: var(--fs-ctx);
@@ -45,13 +95,14 @@
   letter-spacing: 1.4px;
   fill: #5a6a93;
   text-transform: uppercase;
+  font-family: ui-monospace, SFMono-Regular, monospace;
 }
 .ctx-lab.big { font-size: var(--fs-ctx-big); fill: #8ea0c9; letter-spacing: 2px; }
 
 .fc-halo, .fc-edge { pointer-events: none; }
 .fc-title { pointer-events: none; font-size: var(--fs-big); font-weight: 800; }
 
-/* jednotky půdorysu */
+/* Jednotky půdorysu */
 .unit { cursor: default; }
 .unit .u-shape {
   stroke: rgba(255,255,255,.08);
@@ -74,9 +125,8 @@
 }
 .unit.dim { opacity: .2; }
 
-/* popisky */
+/* Popisky jednotek */
 .lab { pointer-events: none; }
-/* odznak s logem je plnohodnotný klikatelný cíl */
 .lab .mark { pointer-events: auto; cursor: pointer; }
 .lab.dim { opacity: .18; }
 .u-label {
@@ -86,22 +136,149 @@
   stroke: rgba(8,12,26,.85);
   stroke-width: calc(var(--sw) * 2.4);
   stroke-linejoin: round;
+  fill: #cbd5e1;
 }
-.u-label.is-v { font-weight: 800; letter-spacing: -.2px; }
+.u-label.is-v { font-weight: 800; letter-spacing: -.2px; fill: #10b981; }
 .lab.sel .u-label { fill: #ffd08a; }
 
-@keyframes slideup { from{transform:translateY(16px);opacity:0} to{transform:translateY(0);opacity:1} }
-.animate-slideup { animation: slideup .22s ease-out; }
+/* Animace */
+@keyframes slideup { from{transform:translateY(12px);opacity:0} to{transform:translateY(0);opacity:1} }
+.animate-slideup { animation: slideup .2s ease-out; }
 
-.row-card { transition: background .15s, border-color .15s, transform .12s; }
-.row-card:hover { transform: translateX(2px); }
+/* Výkonnostní omezení pro plynulé vykreslení */
+.layer-static { pointer-events: none; shape-rendering: optimizeSpeed; }
+.layer-static text { shape-rendering: auto; }
+#mapWrap { contain: layout paint style; }
+#viewport { will-change: transform; }
 
 @media print { #sidebar, #detail, header { display:none } }
 
-/* ---------- výkon ---------- */
-/* statická vrstva okolí se nikdy nemění a nereaguje na ukazatel */
-.layer-static { pointer-events: none; shape-rendering: optimizeSpeed; }
-.layer-static text { shape-rendering: auto; }
-/* omezíme přepočty rozvržení mimo mapu */
-#mapWrap { contain: layout paint style; }
-#viewport { will-change: transform; }
+/* ===================== REFINED BLACK UI ===================== */
+:root {
+  color-scheme: light;
+  --black: #080909;
+  --panel: #101111;
+  --panel-raised: #151616;
+  --line: #252727;
+  --muted: #858b8c;
+  --text: #f1f3f2;
+  --accent: #36c98f;
+}
+
+body { background: var(--black) !important; color: #202323; }
+header,
+#sidebar,
+#detail { background: #f7f8f7 !important; border-color: #dfe3e1 !important; color: #202323; }
+header { background: #ffffff !important; color: #202323; border-color: #e3e6e4 !important; }
+header { min-height: 58px; }
+header h1 { letter-spacing: .08em; color: #171a19 !important; }
+header .border-b,
+#sidebar .border-b,
+#detail .border-b,
+#detail .border-t { border-color: var(--line) !important; }
+
+main,
+#mapWrap { background: #000 !important; }
+#map { background: #000; }
+
+#floorBar,
+#zoomLabel,
+main > .absolute,
+#tip {
+  border-color: #2d3030 !important;
+  background-color: rgba(14, 15, 15, .94) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+}
+
+#floorBar { padding: 3px; gap: 2px; }
+.floor-tab { color: #8d9493; padding: 7px 12px; border-radius: 6px; }
+.floor-tab:hover { background: #202323; color: #fff; }
+.floor-tab.active { background: var(--accent); color: #06130d; }
+
+#sidebar { width: 348px; }
+#sidebar > .p-3 { padding: 16px; gap: 12px; }
+#search {
+  background: #ffffff !important;
+  border-color: #d6dcda !important;
+  color: #202323 !important;
+  border-radius: 8px !important;
+  height: 38px;
+  font-size: 13px;
+}
+#search:focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(54, 201, 143, .1); }
+#catChips { max-height: 76px; gap: 6px; }
+.chip { border-radius: 999px; padding: 5px 9px; background: #171919; border-color: #292c2c; }
+.chip.on { background: rgba(54, 201, 143, .12); border-color: rgba(54, 201, 143, .5); color: #65dca9; }
+.flt { padding: 7px 4px !important; }
+.flt.on { background: #202625; color: #fff; }
+
+#list { padding: 10px; }
+#list > div[data-go] {
+  min-height: 50px;
+  border-radius: 9px !important;
+  border-color: #e1e5e3 !important;
+  background: #ffffff !important;
+}
+#list > div[data-go]:hover { background: #f1f5f3 !important; border-color: #b9c7c1 !important; }
+#list > div[data-go].bg-\[\#101918\] { background: #eef8f3 !important; border-color: #a8d5bd !important; }
+#list .sticky { padding: 14px 8px 7px; background: #f7f8f7 !important; border-color: #e1e5e3 !important; }
+
+#detail { width: 348px; }
+#detail .chip { padding: 4px 8px; }
+#detail textarea,
+#detail input { background: #ffffff !important; border-color: #d6dcda !important; color: #202323 !important; border-radius: 7px; }
+
+#modalBox { background: #111313 !important; border-color: #2d3030 !important; border-radius: 14px !important; }
+#modalBox button { border-radius: 8px; }
+#modalBox .bg-\[\#151821\],
+#modalBox .bg-\[\#161922\] { background: #191c1c !important; border-color: #2b2f2e !important; }
+
+.zbtn { width: 36px; height: 36px; border-radius: 8px; background: rgba(14, 15, 15, .94); border-color: #2d3030; }
+.zbtn:hover { background: #242727; border-color: #505654; }
+
+#storageStatus { font-size: 9px; letter-spacing: .08em; }
+
+/* Light controls keep logos and text readable while the map stays black. */
+#sidebar [class*="text-[#"],
+#detail [class*="text-[#"] { color: #596260 !important; }
+#sidebar .text-white,
+#detail .text-white { color: #202323 !important; }
+#sidebar .text-\[\#10b981\],
+#detail .text-\[\#10b981\] { color: #148354 !important; }
+#sidebar .logo-surface,
+#detail .logo-surface { background: #ffffff; border-color: #d5dcda; }
+.venue-logo { filter: drop-shadow(0 0 1px rgba(0, 0, 0, .75)); }
+.brand-word { color: #202625; font: 700 8px/1 Arial, sans-serif; letter-spacing: .08em; text-align: center; }
+.brand-frankiespub { font-size: 7px; letter-spacing: 0; }
+.m-word { font-family: Arial, sans-serif; font-weight: 700; letter-spacing: .4px; }
+.venue-logo.logo-mcdonalds,
+.m-logo.logo-mcdonalds {
+  filter: brightness(0) saturate(100%) invert(70%) sepia(89%) saturate(1060%) hue-rotate(359deg) brightness(103%) contrast(103%);
+}
+.visit-status {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  border: 1px solid #dce3df; border-radius: 8px; font-size: 11px; line-height: 1.35;
+}
+.visit-status.is-visited { background: #e9f8f0; border-color: #a9d9be; color: #176b45; }
+.visit-status.is-pending { background: #f5f6f5; color: #68736e; }
+.visit-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: #a4afaa; }
+.is-visited .visit-dot { background: #25ae70; box-shadow: 0 0 0 3px rgba(37, 174, 112, .14); }
+.visit-action {
+  width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #cbd5d0;
+  background: #202625; color: #fff; font-size: 12px; font-weight: 600; transition: background .15s, border-color .15s;
+}
+.visit-action:hover { background: #148354; border-color: #148354; }
+.is-visited + .visit-action { background: #fff; color: #56635d; }
+.is-visited + .visit-action:hover { background: #fff1f1; color: #a33d3d; border-color: #d9a8a8; }
+.rating-card { padding: 12px; border: 1px solid #dce3df; border-radius: 10px; background: #f1f6f3; }
+.rating-card label { color: #53605a; }
+.rating-value { color: #277653; font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.rating-star { color: #c5ceca; font-size: 27px; line-height: 1; transition: color .15s, transform .15s; }
+.rating-star:hover, .rating-star.is-active { color: #e2a51d; transform: translateY(-1px); }
+.rating-reset { margin-left: auto; color: #697570; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.rating-reset:hover { color: #b33d3d; }
+@media (max-width: 640px) {
+  header { min-height: 66px; padding-top: 10px !important; padding-bottom: 10px !important; }
+  #sidebar { width: min(348px, 92vw); }
+  #floorBar { top: 10px; }
+}
