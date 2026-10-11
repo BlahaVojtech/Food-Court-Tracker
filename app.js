@@ -1,7 +1,7 @@
 /* ============================================================
    Food Court Tracker — Forum Nová Karolina Ostrava
    Půdorys z oficiální mapy centra (viz plan.js).
-   Vanilla JS + SVG, ukládání pouze v localStorage.
+   Vanilla JS + SVG, data synchronizována s PHP/SQLite API.
    ============================================================ */
 (() => {
 'use strict';
@@ -11,7 +11,14 @@ const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const SVGNS = 'http://www.w3.org/2000/svg';
 
-/* ---------- STAV ---------- */
+function setStorageStatus(shared) {
+  const el = $('#storageStatus');
+  if (!el) return;
+  el.textContent = shared ? 'Data sdílena přes server' : 'Offline režim — data jen v tomto prohlížeči';
+  el.className = shared ? 'text-emerald-400' : 'text-amber-400';
+}
+
+/* ---------- STAV & SYNCHRONIZACE ---------- */
 let state = load();
 let ui = { floor: 'p2', filter: 'all', cats: new Set(), q: '', sel: null };
 
@@ -21,10 +28,62 @@ function load() {
     return (raw && typeof raw === 'object' && raw.venues) ? raw : { venues: {} };
   } catch { return { venues: {} }; }
 }
-function save() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
-  catch { toast('Nepodařilo se uložit ⚠️', true); }
+
+function save(venueIdToSync = null) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+  } catch {
+    toast('Nepodařilo se uložit lokálně ⚠️', true);
+  }
+
+  if (venueIdToSync) {
+    syncVenueToServer(venueIdToSync);
+  }
 }
+
+async function syncVenueToServer(id) {
+  const r = state.venues[id];
+  if (!r) return;
+  try {
+    const res = await fetch('api.php', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: id,
+        visited: r.visited ? 1 : 0,
+        rating: r.rating || 0,
+        note: r.note || '',
+        date: r.date || null
+      })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (err) {
+    console.warn('Chyba při odesílání do databáze:', err);
+  }
+}
+
+async function syncAllFromServer() {
+  try {
+    const res = await fetch('api.php', { cache: 'no-store' });
+    if (!res.ok) {
+      setStorageStatus(false);
+      return;
+    }
+    const data = await res.json();
+    if (data && data.venues) {
+      // Po úspěšném načtení je server jediný sdílený zdroj pravdy.
+      state.venues = data.venues;
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
+      renderAll();
+      setStorageStatus(true);
+    }
+  } catch (err) {
+    console.log('Serverové API není dostupné, běží lokální režim.');
+    setStorageStatus(false);
+  }
+}
+
 const rec = id => state.venues[id] || (state.venues[id] = { visited: false, rating: 0, note: '', date: null });
 const isVisited = id => !!(state.venues[id] && state.venues[id].visited);
 
@@ -49,6 +108,12 @@ const KIND_FILL = { shop: '#232f52', service: '#1b2440', vert: '#2f3d68', area: 
 const NOPE = '#ef4444', YES = '#10b981';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+const logoMarkup = (v, cls = '') => {
+  const url = typeof logoUrl === 'function' ? logoUrl(v.id) : null;
+  return url
+    ? `<img src="${esc(url)}" alt="" class="${cls} object-contain" loading="lazy">`
+    : `<span class="${cls}">${esc(cat(v.cat).icon)}</span>`;
+};
 
 /* podniky v okolí centra (extra.js) — vlastní „patro", které je vidět vždy */
 const OUT_ID = 'out';
@@ -175,14 +240,12 @@ const endDrag = e => { if (drag && drag.id === e.pointerId) drag = null; };
 wrap.addEventListener('pointerup', endDrag);
 wrap.addEventListener('pointercancel', endDrag);
 
-/* Výběr řešíme na pointerup, ne na click: po setPointerCapture Chrome
-   přesměruje click na #mapWrap, takže by se k podniku nikdy nedostal. */
 wrap.addEventListener('pointerup', e => {
   if (moved > 6) return;
   const t = document.elementFromPoint(e.clientX, e.clientY);
-  if (!t || !t.closest('#map')) return;   // ovládací prvky nad mapou výběr neruší
+  if (!t || !t.closest('#map')) return;
   const info = hitInfo(t);
-  if (info && info.v) select(info.v.id, 'keep');   // stejný detail jako klik v seznamu, bez přiblížení
+  if (info && info.v) select(info.v.id, 'keep');
   else select(null);
 });
 
@@ -194,7 +257,7 @@ wrap.addEventListener('wheel', e => {
 
 wrap.addEventListener('dblclick', e => {
   const info = hitInfo(document.elementFromPoint(e.clientX, e.clientY));
-  if (info && info.v) { toggle(info.v.id); return; }   // dvojklik = odškrtnutí
+  if (info && info.v) { toggle(info.v.id); return; }
   const r = wrap.getBoundingClientRect();
   zoomAt(e.clientX - r.left, e.clientY - r.top, 1.8);
 });
@@ -254,16 +317,12 @@ function el(name, attrs = {}, parent) {
   return n;
 }
 
-/* uzly aktuálně zobrazeného patra */
 let labelNodes = [], markNodes = [], trackedNodes = [], ctxLabels = [];
-/* jednotka → { u, v } pro delegované události */
 const UNIT_INFO = new WeakMap();
 
 /* ============================================================
-   OKOLÍ — skutečná geometrie z OpenStreetMap (surround.js)
+   OKOLÍ — geometrie z OpenStreetMap
    ============================================================ */
-
-/* výchozí výřez — patro plus kus okolí */
 function fitBox(f) {
   const m = Math.max(f.bw, f.bh) * 0.11;
   return { x: f.bx - m, y: f.by - m, w: f.bw + 2 * m, h: f.bh + 2 * m };
@@ -276,19 +335,15 @@ function drawContext(parent) {
   const g = el('g', { class: 'ctx' }, parent);
   const S = SURROUND;
 
-  // zeleň
   const gg = el('g', { fill: '#13291b', stroke: '#1b3d27', 'stroke-width': 2 }, g);
   S.green.forEach(o => el('path', { d: o.d }, gg));
 
-  // vodní plochy
   const gw = el('g', { fill: '#10273f', stroke: '#1b3d61', 'stroke-width': 2 }, g);
   S.water.forEach(o => el('path', { d: o.d }, gw));
 
-  // parkoviště
   const gp = el('g', { fill: '#151c32', stroke: '#222b4c', 'stroke-width': 2 }, g);
   S.parking.forEach(o => el('path', { d: o.d }, gp));
 
-  // silnice — nejdřív tmavé obruby, pak výplň
   const cas = el('g', { fill: 'none', stroke: '#0e1428', 'stroke-linecap': 'round',
                         'stroke-linejoin': 'round' }, g);
   S.roads.filter(r => !r.f).forEach(r =>
@@ -296,12 +351,11 @@ function drawContext(parent) {
   const rd = el('g', { fill: 'none', stroke: '#222b4e', 'stroke-linecap': 'round',
                        'stroke-linejoin': 'round' }, g);
   S.roads.filter(r => !r.f).forEach(r => el('path', { d: r.d, 'stroke-width': r.w }, rd));
-  // chodníky a pěší zóny
+
   const fw = el('g', { fill: 'none', stroke: '#1b2440', 'stroke-width': 4,
                        'stroke-dasharray': '10 7', 'stroke-linecap': 'round' }, g);
   S.roads.filter(r => r.f).forEach(r => el('path', { d: r.d }, fw));
 
-  // koleje — podklad, pražce, kolejnice
   const rlBase = el('g', { fill: 'none', stroke: '#101830', 'stroke-width': 16,
                            'stroke-linecap': 'round' }, g);
   const rlTie = el('g', { fill: 'none', stroke: '#333f6b', 'stroke-width': 13,
@@ -313,11 +367,9 @@ function drawContext(parent) {
     el('path', { d: r.d, 'stroke-dasharray': r.t === 'tram' ? '14 10' : null }, rlTop);
   });
 
-  // budovy
   const gb = el('g', { stroke: '#2c3555', 'stroke-width': 2, 'stroke-linejoin': 'round' }, g);
   S.buildings.forEach(b => el('path', { d: b.d, fill: BLD_FILL[b.k] || BLD_FILL.gen }, gb));
 
-  // popisky ulic
   S.streets.forEach(s => {
     const t = el('text', { class: 'ctx-lab', x: s.x, y: s.y, 'text-anchor': 'middle',
                            transform: `rotate(${s.r} ${s.x} ${s.y})` }, g);
@@ -325,7 +377,6 @@ function drawContext(parent) {
     ctxLabels.push({ node: t, minK: 0.55 });
   });
 
-  // popisky významných budov
   S.buildings.forEach(b => {
     if (!b.n || b.a < 2600) return;
     const t = el('text', { class: 'ctx-lab big', x: b.lx, y: b.ly, 'text-anchor': 'middle' }, g);
@@ -334,7 +385,6 @@ function drawContext(parent) {
   });
 }
 
-/* statická vrstva (mřížka + okolí) se kreslí jen jednou za celou relaci */
 let staticLayer = null;
 function buildStatic() {
   if (staticLayer) return staticLayer;
@@ -343,7 +393,6 @@ function buildStatic() {
   el('rect', { x: cb.x - 200, y: cb.y - 200, width: cb.w + 400, height: cb.h + 400, fill: 'url(#grid)' }, g);
   drawContext(g);
 
-  // silueta centra podle OpenStreetMap — společná pro všechna patra
   const mall = typeof SURROUND !== 'undefined' && SURROUND.mall;
   if (mall) {
     el('path', { d: mall.d, fill: '#212f5e', stroke: '#4f66ad', 'stroke-width': 3,
@@ -353,7 +402,6 @@ function buildStatic() {
   return g;
 }
 
-/* vrstvy pater se staví jen při prvním zobrazení a pak se jen přepínají */
 const floorCache = new Map();
 
 function buildFloorLayer(f) {
@@ -363,10 +411,8 @@ function buildFloorLayer(f) {
   const g = el('g', { class: 'layer-floor' + (isOutside(f) ? ' layer-out' : '') });
   const labels = [], marks = [], tracked = [];
 
-  // podstava patra — jednotky spojené do jednoho tvaru
   const hasMall = typeof SURROUND !== 'undefined' && !!SURROUND.mall;
   if (isOutside(f)) {
-    // samostatné budovy v okolí — vlastní podstava, ať vystoupí z pozadí
     const pad = el('g', { fill: '#2b3a6b', stroke: '#5e76c4', 'stroke-width': 9,
                           'stroke-linejoin': 'round' }, g);
     f.units.forEach(u => el('path', { d: u.d }, pad));
@@ -381,7 +427,6 @@ function buildFloorLayer(f) {
     f.units.forEach(u => el('path', { d: u.d }, slab));
   }
 
-  // zóna food courtu — jen nadpis
   const fcu = f.units.filter(u => u.fc);
   if (fcu.length) {
     let cx = 0, cy = 0;
@@ -408,7 +453,6 @@ function drawFloor() {
   const entry = buildFloorLayer(f);
   if (!entry.g.parentNode) vp.appendChild(entry.g);
 
-  // podniky v okolí jsou nad centrem vidět pořád, nezávisle na patře
   const outF = floorOf(OUT_ID);
   const out = outF ? buildFloorLayer(outF) : null;
   if (out && !out.g.parentNode) vp.appendChild(out.g);
@@ -432,16 +476,14 @@ function drawUnit(u, parent, tracked) {
   if (v) tracked.push({ node: g, shape: sh, v });
 }
 
-/* odznak s logem — výrazně větší než dřívější kolečko a v poměru stran loga */
-const BADGE_H = 32;        // výška odznaku ve světových jednotkách (8 m)
-const BADGE_AR_MAX = 3.4;  // velmi široká loga se doplní průhlednými okraji
+const BADGE_H = 32;
+const BADGE_AR_MAX = 3.4;
 
 function drawLabel(u, parent, labels, marks) {
   const v = u.v ? venue(u.v) : null;
   if (!u.n && !v) return;
 
   const g = el('g', { class: 'lab', transform: `translate(${u.lx} ${u.ly})` }, parent);
-  // prahová hodnota přiblížení — popisek se objeví, až se vejde do jednotky
   const minK = v
     ? Math.min(3, Math.max(0.5, (v.name.length * 5.6) / Math.max(u.w, 24)))
     : Math.min(3.2, Math.max(0.7, Math.sqrt(9000 / Math.max(u.a, 40))));
@@ -470,7 +512,6 @@ function drawLabel(u, parent, labels, marks) {
                  fill: 'none', stroke: '#fff', 'stroke-width': 2.2,
                  'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, ck);
 
-    // odznak nikdy nemá výrazně přerůst svou jednotku
     const maxS = Math.max(0.55, Math.min(u.w * 0.95 / bw, u.h * 0.95 / bh));
     marks.push({ node: mk, wrap: g, bg, ck, v, maxS, last: -1 });
     UNIT_INFO.set(mk, { u, v });
@@ -485,7 +526,6 @@ function drawLabel(u, parent, labels, marks) {
   labels.push({ node: g, lab: t, minK, base, shown: null, last: -1 });
 }
 
-/* velikost popisků a odznaků držíme konstantní vůči obrazovce */
 let lastLOD = -1, lastCtxLOD = -1;
 function updateLOD(force) {
   const k = view.k;
@@ -509,7 +549,6 @@ function updateLOD(force) {
     const y = +(l.base / k).toFixed(1);
     if (y !== l.last) { l.lab.setAttribute('y', y); l.last = y; }
   }
-  // popisky okolí patří statické vrstvě — stačí je přepočítat při změně zoomu
   if (k !== lastCtxLOD) {
     for (const c of ctxLabels) {
       const show = k >= c.minK;
@@ -547,14 +586,12 @@ function moveTip(e) {
 }
 const hideTip = () => $('#tip').classList.add('hidden');
 
-/* klikatelné cíle na mapě: obrys jednotky i odznak s logem */
 const HIT = '.unit, .mark';
 const hitInfo = t => {
   const n = t && t.closest ? t.closest(HIT) : null;
   return n ? UNIT_INFO.get(n) : null;
 };
 
-/* delegované události — jeden posluchač místo stovek */
 let hoverUnit = null;
 vp.addEventListener('pointerover', e => {
   const g = e.target.closest ? e.target.closest(HIT) : null;
@@ -570,8 +607,6 @@ vp.addEventListener('pointerout', e => {
   hoverUnit = null; hideTip();
 });
 vp.addEventListener('pointermove', e => { if (hoverUnit) moveTip(e); });
-
-
 
 /* ============================================================
    FILTRY
@@ -654,7 +689,7 @@ function renderList() {
             ${on ? 'bg-emerald-500 border-emerald-500 text-slate-900' : 'border-white/25 text-transparent hover:border-brand-400'}">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="3.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m5 13 4 4L19 7"/></svg>
           </button>
-          <span class="text-base shrink-0">${c.icon}</span>
+          <span class="w-8 h-8 shrink-0 rounded-lg bg-white grid place-items-center overflow-hidden p-1">${logoMarkup(v, 'max-w-full max-h-full')}</span>
           <div class="min-w-0 flex-1">
             <div class="text-[13px] font-semibold truncate ${on ? 'text-emerald-300' : ''}">${esc(v.name)}${v.fc ? ' <span class="text-brand-400 text-[10px] align-middle">FC</span>' : ''}</div>
             <div class="text-[11px] text-slate-400 truncate">${esc(v.desc)}</div>
@@ -665,10 +700,9 @@ function renderList() {
   });
 
   $('#list').innerHTML = html;
-  $$('#list [data-tog]').forEach(b => b.onclick = e => { e.stopPropagation(); toggle(b.dataset.tog); });
-  $$('#list [data-go]').forEach(d => d.onclick = () => {
+  $$('#list [data-tog]').forEach(b => b.onclick = e => { e.stopPropagation(); toggle(b.dataset.tog); });   $$
+('#list [data-go]').forEach(d => d.onclick = () => {
     const v = venue(d.dataset.go);
-    // podniky v okolí jsou viditelné nad každým patrem, patro se tedy nepřepíná
     if (v.floor !== ui.floor && v.floor !== OUT_ID) { ui.floor = v.floor; drawFloor(); renderFloors(); }
     select(v.id, true);
   });
@@ -701,7 +735,6 @@ function renderFloors() {
 /* ============================================================
    DETAIL
    ============================================================ */
-/* focus === true → přiblížit (seznam), 'keep' → jen otevřít detail bez zoomu (mapa) */
 function select(id, focus) {
   ui.sel = (ui.sel === id && !focus) ? null : id;
   refreshMap(); renderList(); renderDetail();
@@ -724,7 +757,7 @@ function renderDetail() {
 
   p.innerHTML = `
     <div class="p-4 border-b border-white/10 flex items-start gap-3">
-      <div class="w-11 h-11 rounded-xl grid place-items-center text-xl shrink-0" style="background:${c.color}33;border:1px solid ${c.color}66">${c.icon}</div>
+      <div class="w-11 h-11 rounded-xl grid place-items-center text-xl shrink-0 overflow-hidden p-1.5" style="background:${c.color}33;border:1px solid ${c.color}66">${logoMarkup(v, 'max-w-full max-h-full')}</div>
       <div class="min-w-0 flex-1">
         <h2 class="font-extrabold text-[17px] leading-tight break-words">${esc(v.name)}</h2>
         <p class="text-xs text-slate-400 mt-0.5">${esc(c.label)} · ${esc(f.name)}${v.fc ? ' · <span class="text-brand-400 font-semibold">food court</span>' : ''}</p>
@@ -771,10 +804,9 @@ function renderDetail() {
 
   $('#dClose').onclick = () => select(null);
   $('#dTog').onclick = () => toggle(v.id);
-  $('#dFocus').onclick = () => focusOn(v, 5);
-  $$('#stars [data-s]').forEach(b => b.onclick = () => { rec(v.id).rating = +b.dataset.s; save(); renderDetail(); renderList(); });
-  $('#dDate').onchange = e => { rec(v.id).date = e.target.value || null; save(); };
-  let nt; $('#dNote').oninput = e => { clearTimeout(nt); nt = setTimeout(() => { rec(v.id).note = e.target.value; save(); }, 350); };
+  $('#dFocus').onclick = () => focusOn(v, 5);   $$('#stars [data-s]').forEach(b => b.onclick = () => { rec(v.id).rating = +b.dataset.s; save(v.id); renderDetail(); renderList(); });
+  $('#dDate').onchange = e => { rec(v.id).date = e.target.value || null; save(v.id); };
+  let nt; $('#dNote').oninput = e => { clearTimeout(nt); nt = setTimeout(() => { rec(v.id).note = e.target.value; save(v.id); }, 350); };
 }
 
 function toggle(id) {
@@ -782,7 +814,7 @@ function toggle(id) {
   r.visited = !r.visited;
   if (r.visited && !r.date) r.date = new Date().toISOString().slice(0, 10);
   if (!r.visited) r.rating = 0;
-  save();
+  save(id);
   const v = venue(id);
   if (r.visited) {
     const done = VENUES.filter(x => isVisited(x.id)).length;
@@ -797,10 +829,7 @@ function toggle(id) {
 const closeModal = () => $('#modal').classList.add('hidden');
 function openModal(html) {
   $('#modalBox').innerHTML = html;
-  const m = $('#modal');
-  m.classList.remove('hidden'); m.classList.add('flex');
-  m.onclick = e => { if (e.target === m) closeModal(); };
-  $$('#modalBox [data-close]').forEach(b => b.onclick = closeModal);
+  const m = $('#modal');   m.classList.remove('hidden'); m.classList.add('flex');   m.onclick = e => { if (e.target === m) closeModal(); };   $$('#modalBox [data-close]').forEach(b => b.onclick = closeModal);
 }
 
 $('#btnStats').onclick = () => {
@@ -833,8 +862,8 @@ $('#btnStats').onclick = () => {
           ${Object.entries(byCat).sort((a, b) => b[1].t - a[1].t).map(([c, o]) => {
             const k = cat(c), p = Math.round(o.d / o.t * 100);
             return `<div class="flex items-center gap-2 text-xs">
-              <span class="w-32 shrink-0 truncate">${k.icon} ${esc(k.label)}</span>
-              <div class="flex-1 h-2 rounded-full bg-white/10 overflow-hidden"><div class="h-full rounded-full" style="width:${p}%;background:${k.color}"></div></div>
+              <span class="w-32 shrink-0 truncate">${k.icon}${esc(k.label)}</span>
+              <div class="flex-1 h-2 rounded-full bg-white/10 overflow-hidden"><div class="h-full rounded-full" style="width:${p}\%;background:${k.color}"></div></div>
               <span class="w-11 text-right tabular-nums text-slate-400">${o.d}/${o.t}</span></div>`;
           }).join('')}
         </div>
@@ -853,7 +882,7 @@ $('#btnMenu').onclick = () => openModal(`
       <h2 class="text-lg font-extrabold">Nastavení a data</h2>
       <button data-close class="p-1.5 rounded-lg hover:bg-white/10">✕</button>
     </div>
-    <p class="text-xs text-slate-400">Veškerý postup je uložen <b>pouze ve tvém prohlížeči</b> (localStorage). Nic se nikam neodesílá. Zálohu si udělej exportem.</p>
+    <p class="text-xs text-slate-400">Veškerý postup je sdílen v centrální databázi a zálohován v prohlížeči (localStorage).</p>
     <div class="grid grid-cols-2 gap-2">
       <button id="mExport" class="py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-sm font-semibold border border-white/10">⬇️ Export JSON</button>
       <button id="mImport" class="py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-sm font-semibold border border-white/10">⬆️ Import JSON</button>
@@ -889,6 +918,7 @@ document.addEventListener('click', e => {
           const d = JSON.parse(rd.result);
           if (!d || typeof d !== 'object' || !d.venues) throw 0;
           state = d; save(); renderAll(); closeModal(); toast('Importováno ✓');
+          Object.keys(state.venues).forEach(id => syncVenueToServer(id));
         } catch { toast('Neplatný soubor', true); }
       };
       rd.readAsText(f);
@@ -897,12 +927,24 @@ document.addEventListener('click', e => {
   }
   if (t.id === 'mAll') {
     if (!confirm('Opravdu označit všech ' + VENUES.length + ' podniků jako navštívené?')) return;
-    VENUES.forEach(v => { const r = rec(v.id); r.visited = true; r.date ||= new Date().toISOString().slice(0, 10); });
+    VENUES.forEach(v => {
+      const r = rec(v.id);
+      r.visited = true;
+      r.date ||= new Date().toISOString().slice(0, 10);
+      syncVenueToServer(v.id);
+    });
     save(); renderAll(); closeModal();
   }
   if (t.id === 'mClear' || t.id === 'btnReset') {
     if (!confirm('Opravdu vymazat celý postup? Tuto akci nelze vrátit.')) return;
-    state = { venues: {} }; save(); ui.sel = null; renderAll(); closeModal(); toast('Vymazáno');
+    const oldKeys = Object.keys(state.venues);
+    state = { venues: {} };
+    save();
+    ui.sel = null;
+    renderAll();
+    closeModal();
+    toast('Vymazáno');
+    oldKeys.forEach(id => syncVenueToServer(id));
   }
 });
 
@@ -915,13 +957,7 @@ let st; $('#search').oninput = e => { clearTimeout(st); st = setTimeout(() => { 
 const openSidebar  = () => { $('#sidebar').classList.remove('-translate-x-full'); $('#scrim').classList.remove('hidden'); };
 const closeSidebar = () => { $('#sidebar').classList.add('-translate-x-full'); $('#scrim').classList.add('hidden'); };
 $('#btnSidebar').onclick = () => $('#sidebar').classList.contains('-translate-x-full') ? openSidebar() : closeSidebar();
-$('#scrim').onclick = closeSidebar;
-
-/* ============================================================
-   START
-   ============================================================ */
-function renderAll() {
-  $$('.flt').forEach(b => b.classList.toggle('on', b.dataset.filter === ui.filter));
+$('#scrim').onclick = closeSidebar;  /* ============================================================    START    ============================================================ */ function renderAll() {   $$('.flt').forEach(b => b.classList.toggle('on', b.dataset.filter === ui.filter));
   renderChips(); renderList(); renderProgress(); renderFloors(); refreshMap(); renderDetail();
 }
 
@@ -929,6 +965,7 @@ renderFloors();
 drawFloor();
 renderAll();
 fit(false);
+syncAllFromServer();
+window.addEventListener('focus', syncAllFromServer);
 console.log(`🍽️ Food Court Tracker · ${VENUES.length} podniků · ${FLOORS.length} pater · ${FLOORS.reduce((s, f) => s + f.units.length, 0)} jednotek půdorysu`);
 })();
-

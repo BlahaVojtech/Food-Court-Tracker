@@ -4,7 +4,11 @@ Webový záznamník navštívených restaurací a podniků ve **Forum Nová Karo
 postavený nad **skutečným půdorysem** z oficiální mapy centra a zasazený do **georeferencované
 mapy okolí** z OpenStreetMap.
 
-Vše běží čistě v prohlížeči — **žádný backend, žádná databáze**. Data se ukládají do `localStorage`.
+Po nahrání na PHP hosting se data ukládají do společného souboru na serveru mimo veřejnou složku
+webu. API automaticky
+použije SQLite (`foodcourt.sqlite`), pokud ho hosting podporuje, nebo JSON (`foodcourt-data.json`)
+jako fallback. Instalace databázového serveru ani balíčků není potřeba. Při dočasné nedostupnosti
+API zůstává jako záloha `localStorage` v prohlížeči.
 
 ## Funkce
 
@@ -30,10 +34,16 @@ Vše běží čistě v prohlížeči — **žádný backend, žádná databáze*
 git clone https://github.com/BlahaVojtech/Food-Court-Tracker.git
 cd Food-Court-Tracker
 python -m http.server 8777        # nebo: npm start
-# → http://localhost:8777
+# → http://localhost:8777 (lokální náhled bez PHP databáze)
 ```
 
-Aplikace je statická — jde nasadit na GitHub Pages, Netlify i jakýkoli webhosting bez úprav.
+Pro plné ukládání nahrajte na hosting všechny soubory včetně `api.php` a zajistěte, aby PHP mělo
+zapnuté PDO SQLite a složka aplikace byla zapisovatelná. Databázový soubor se vytvoří automaticky
+při prvním požadavku. Na čistě statickém hostingu poběží pouze lokální záloha v prohlížeči.
+
+Všichni návštěvníci webu používají stejnou databázi: po načtení stránky vidí stejné návštěvy,
+hodnocení, komentáře i data. Přihlášení není zapnuté, takže každý návštěvník může sdílená data také
+měnit.
 
 ## Struktura
 
@@ -42,7 +52,8 @@ Aplikace je statická — jde nasadit na GitHub Pages, Netlify i jakýkoli webho
 | `index.html` | Kostra aplikace, SVG `<defs>`, kompas, měřítko, legenda |
 | `styles.css` | Doplňkové styly mapy (jednotky, popisky, odznaky, zóna food courtu) |
 | `tailwind.css` | **Generované** Tailwind CSS (`npm run build:css`) |
-| `app.js` | Logika — pan/zoom engine, vykreslování, seznam, detail, localStorage |
+| `app.js` | Logika — pan/zoom engine, vykreslování, seznam, detail, API synchronizace a localStorage záloha |
+| `api.php` | Bezinstalační API nad SQLite: aktuální stav i historie všech změn |
 | `plan.js` | **Generovaný** půdorys: `FLOORS` (5 pater × jednotky) + `VENUES` (34 podniků) |
 | `surround.js` | **Generované** okolí z OpenStreetMap + silueta centra + rámec mapy |
 | `extra.js` | **Generované** podniky v okolí centra, které nejsou v půdorysu |
@@ -147,7 +158,10 @@ Aplikace je laděná na plynulý pan/zoom i na slabších strojích:
 
 ## Uložená data
 
-Klíč `localStorage`: **`fnk-foodcourt-v1`**
+Databáze `foodcourt.sqlite` obsahuje aktuální stav v tabulce `venues` a historii změn v tabulce
+`venue_actions`. Každá změna návštěvy, hodnocení, komentáře nebo data návštěvy se uloží jako akce.
+
+Záložní klíč `localStorage`: **`fnk-foodcourt-v1`**
 
 ```json
 { "kfc": { "visited": true, "rating": 4, "date": "2025-03-12", "note": "..." } }

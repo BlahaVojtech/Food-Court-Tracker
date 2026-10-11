@@ -1,0 +1,4 @@
+# SQLite soubor obsahuje všechna data aplikace a nesmí být veřejně stažitelný.
+<FilesMatch "^foodcourt\.(?:sqlite(?:-.*)?|json)$">
+    Require all denied
+</FilesMatch>
