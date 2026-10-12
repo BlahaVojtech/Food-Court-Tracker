@@ -47,12 +47,20 @@ const units = [];
 const venues = [];
 
 {
-  const c = geoToWorld(PUB.lat, PUB.lon);
-  const w = PUB.wM * S, h = PUB.hM * S;
-  const x = Math.round(c.x - w / 2), y = Math.round(c.y - h / 2);
+  /* Provozovna sedí v jihozápadním rohu sousední budovy (OSM polygon):
+     roh a směry obou stěn jsou převzaty z jejího obrysu. */
+  const w = PUB.wM * S, h = PUB.hM * S, inset = 2;
+  const corner = [1244, 1012], east = [1419, 992], north = [1205, 696];
+  const unit = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy); return [dx / l, dy / l]; };
+  const u = unit(corner, east), v = unit(corner, north);
+  const at = (s, t) => [Math.round(corner[0] + u[0] * s + v[0] * t), Math.round(corner[1] + u[1] * s + v[1] * t)];
+  const pts = [at(inset, inset), at(inset + w, inset), at(inset + w, inset + h), at(inset, inset + h)];
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x = Math.min(...xs), y = Math.min(...ys);
   units.push({
-    poi: PUB.osm, d: `M${x} ${y}H${x + w}V${y + h}H${x}Z`, k: 'shop', n: PUB.name,
-    lx: Math.round(c.x), ly: Math.round(c.y), x, y, w, h, a: w * h, v: PUB.id, fc: 0,
+    poi: PUB.osm, d: 'M' + pts.map(p => p.join(' ')).join('L') + 'Z', k: 'shop', n: PUB.name,
+    lx: Math.round(xs.reduce((a, b) => a + b) / 4), ly: Math.round(ys.reduce((a, b) => a + b) / 4),
+    x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y, a: w * h, v: PUB.id, fc: 0,
   });
 }
 

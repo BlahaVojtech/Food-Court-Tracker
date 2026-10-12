@@ -19,7 +19,10 @@ const IDS = ['kanteen', 'cokafe'];
   const dims = {};
   for (const id of IDS) {
     const svg = path.join(__dirname, 'organica', id + '.svg');
-    const buf = await sharp(svg, { density: 600 })
+    // logo Cokafe je na webu bílé na fotce; na světlé mapě ho přebarvíme
+    const raw = fs.readFileSync(svg, 'utf8');
+    const src = id === 'cokafe' ? raw.replace(/fill="#fff(fff)?"/gi, 'fill="#2b2b2b"') : raw;
+    const buf = await sharp(Buffer.from(src), { density: 600 })
       .trim()
       .resize(PX, PX, { fit: 'inside' })
       .webp({ quality: 88, alphaQuality: 100 })
