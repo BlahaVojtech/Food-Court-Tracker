@@ -104,7 +104,9 @@ npm run build              # → tailwind.css, plan.js, logos/, surround.js, ext
 |---|---|
 | `tools/build-plan.js` | `plan.js`, `logos.js`, `logos/*.webp` |
 | `tools/build-surround.js` | `surround.js` (okolí + silueta centra) |
-| `tools/build-extra.js` | `extra.js` (podniky v okolí) |
+| `tools/build-extra.js` | `extra.js` (Frankie's, Kanteen, Cokafe) + `organica.js` (půdorys Organiky podle organicaostrava.cz/retail) |
+| `tools/build-organica-logos.js` | `logos/kanteen.webp`, `logos/cokafe.webp` |
+| `tools/extract-organica.js` | jednorázově: `tools/organica/plan.json` z oficiálního SVG plánu |
 | `tools/frame.js` | společný souřadnicový rámec — používají ho všechny generátory |
 | `tools/geo.js` | převody UTM 34N ↔ WGS84, bez závislostí |
 

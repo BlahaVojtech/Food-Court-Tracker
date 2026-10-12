@@ -1,21 +1,30 @@
-/** Konfigurace Tailwindu — shodná s dřívějším inline nastavením pro CDN.
- *  Build:  npx tailwindcss -i tailwind.src.css -o tailwind.css --minify
- *  Díky předkompilovanému CSS odpadá ~120 kB blokujícího JS z cdn.tailwindcss.com. */
+/** Tailwind — barvy jsou design tokeny (viz :root ve styles.css).
+ *  Build:  npm run build:css */
 module.exports = {
   content: ['./index.html', './app.js'],
-  darkMode: 'class',
   theme: {
     extend: {
-      fontFamily: { sans: ['Inter', 'Segoe UI', 'system-ui', 'sans-serif'] },
+      fontFamily: {
+        sans: ['Figtree', 'system-ui', 'Segoe UI', 'sans-serif'],
+        display: ['"Barlow Condensed"', 'Figtree', 'system-ui', 'sans-serif'],
+      },
       colors: {
-        ink: { 900: '#0b1020', 800: '#111830', 700: '#1a2340', 600: '#243055' },
-        brand: { 400: '#ffb43a', 500: '#ff9500', 600: '#e07b00' },
+        paper: '#faf8f5',
+        canvas: '#f1eee9',
+        ink: '#26231f',
+        ink2: '#6b655d',
+        ink3: '#9a948b',
+        line: '#e4dfd7',
+        line2: '#cfc8bc',
+        accent: '#a28d76',
+        accentink: '#6f5d49',
+        yes: '#3b8559',
+        no: '#c0453a',
       },
       keyframes: {
-        pop: { '0%': { transform: 'scale(.6)', opacity: 0 }, '70%': { transform: 'scale(1.15)' }, '100%': { transform: 'scale(1)', opacity: 1 } },
-        slideup: { '0%': { transform: 'translateY(16px)', opacity: 0 }, '100%': { transform: 'translateY(0)', opacity: 1 } },
+        slideup: { '0%': { transform: 'translateY(8px)', opacity: 0 }, '100%': { transform: 'translateY(0)', opacity: 1 } },
       },
-      animation: { pop: 'pop .28s ease-out', slideup: 'slideup .22s ease-out' },
+      animation: { slideup: 'slideup .16s ease-out' },
     },
   },
 };

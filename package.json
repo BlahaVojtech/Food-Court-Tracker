@@ -7,7 +7,7 @@
     "start": "python -m http.server 8777",
     "build": "npm run build:css && npm run build:data",
     "build:css": "tailwindcss -i tailwind.src.css -o tailwind.css --minify",
-    "build:data": "node tools/build-plan.js && node tools/build-surround.js && node tools/build-extra.js",
+    "build:data": "node tools/build-plan.js && node tools/build-surround.js && node tools/build-extra.js && node tools/build-organica-logos.js",
     "fetch:osm": "node tools/fetch-osm.js"
   },
   "devDependencies": {
@@ -16,3 +16,4 @@
     "tailwindcss": "^3.4.17"
   }
 }
+
