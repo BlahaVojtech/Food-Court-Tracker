@@ -4,11 +4,12 @@ Webový záznamník navštívených restaurací a podniků ve **Forum Nová Karo
 postavený nad **skutečným půdorysem** z oficiální mapy centra a zasazený do **georeferencované
 mapy okolí** z OpenStreetMap.
 
-Po nahrání na PHP hosting se data ukládají do společného souboru na serveru mimo veřejnou složku
-webu. API automaticky
-použije SQLite (`foodcourt.sqlite`), pokud ho hosting podporuje, nebo JSON (`foodcourt-data.json`)
-jako fallback. Instalace databázového serveru ani balíčků není potřeba. Při dočasné nedostupnosti
-API zůstává jako záloha `localStorage` v prohlížeči.
+Po nahrání na PHP hosting se data ukládají do **společné (globální) databáze** na serveru mimo
+veřejnou složku webu — všechna zařízení vidí stejný stav. `api.php` použije SQLite
+(`foodcourt.sqlite`), nebo JSON (`foodcourt-data.json`) jako fallback; nic se neinstaluje.
+`localStorage` slouží jako lokální kopie a offline fronta: změny, které se nepodařilo odeslat,
+se odešlou při další synchronizaci. Při prvním připojení se existující lokální data nahrají na server.
+Bez PHP (např. lokální náhled) aplikace funguje jen s `localStorage`.
 
 ## Funkce
 
@@ -169,7 +170,7 @@ Záložní klíč `localStorage`: **`fnk-foodcourt-v1`**
 { "kfc": { "visited": true, "rating": 4, "date": "2025-03-12", "note": "..." } }
 ```
 
-Tlačítko *Vymazat* v patičce smaže vše. Export/import je v menu ⋮ v hlavičce.
+Tlačítko *Smazat vše* smaže stav i na serveru (historie změn zůstane). Export/import je v okně *Data*.
 
 ---
 

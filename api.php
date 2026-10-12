@@ -126,6 +126,33 @@ if ($method === 'POST') {
     $raw = file_get_contents("php://input");
     $data = json_decode($raw, true);
 
+    // Smazání celého postupu; historie změn zůstává zachována.
+    if (is_array($data) && !empty($data['clear'])) {
+        try {
+            if ($useSqlite) {
+                $db->beginTransaction();
+                $db->exec("INSERT INTO venue_actions (venue_id, action, old_value, new_value)
+                    SELECT id, 'clear', visited, NULL FROM venues");
+                $db->exec("DELETE FROM venues");
+                $db->commit();
+            } else {
+                $store = readJsonStore($jsonFile);
+                foreach (array_keys($store['venues']) as $vid) {
+                    $store['actions'][] = ['venue_id' => $vid, 'action' => 'clear',
+                        'old_value' => null, 'new_value' => null, 'created_at' => gmdate('c')];
+                }
+                $store['venues'] = [];
+                if (!writeJsonStore($jsonFile, $store)) throw new RuntimeException('write');
+            }
+            echo json_encode(["success" => true]);
+        } catch (Exception $e) {
+            if ($useSqlite && $db->inTransaction()) $db->rollBack();
+            http_response_code(500);
+            echo json_encode(["error" => "Chyba při mazání dat."]);
+        }
+        exit();
+    }
+
     if (empty($data['id'])) {
         http_response_code(400);
         echo json_encode(["error" => "Chýba identifikátor podniku 'id'."]);
