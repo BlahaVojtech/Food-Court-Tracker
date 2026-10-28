@@ -13,12 +13,42 @@ const SVGNS = 'http://www.w3.org/2000/svg';
 function setStorageStatus(shared) {
   const el = $('#storageStatus');
   if (!el) return;
-  el.textContent = shared ? 'Synchronizováno se serverem' : 'Uloženo v prohlížeči';
+  if (window.DB && window.DB.isCloud()) {
+    el.innerHTML = '<span class="text-yes font-medium">● Supabase Cloud (Vercel)</span>';
+  } else {
+    el.textContent = 'Uloženo v prohlížeči (offline/lokálně)';
+  }
+}
+
+/* Pomocné funkce pro zobrazení osob a hodnocení */
+function starsMarkup(rating) {
+  const r = Math.round(rating || 0);
+  return `<span class="text-[#c98a1e] tracking-tight">${'★'.repeat(r)}${'☆'.repeat(5 - r)}</span>`;
+}
+
+function memberPillMarkup(member, isSelected = false) {
+  if (!member) return '';
+  const activeStyle = isSelected
+    ? `background-color:${esc(member.color)}; border-color:${esc(member.color)}; color:#fff;`
+    : `border-color:var(--line-2); background:#fff; color:var(--ink);`;
+  return `
+    <button type="button" class="author-pill ${isSelected ? 'active' : ''}" data-author="${esc(member.id)}" style="${activeStyle}">
+      <span class="author-logo">${esc(member.logo || '👤')}</span>
+      <span>${esc(member.name)}</span>
+    </button>`;
 }
 
 /* ---------- STAV & SYNCHRONIZACE ---------- */
 let state = load();
-let ui = { floor: 'p2', filter: 'all', cats: new Set(), q: '', sel: null };
+let ui = {
+  floor: 'p2',
+  filter: 'all',
+  cats: new Set(),
+  q: '',
+  sel: null,
+  viewMemberId: 'all', // 'all' = všichni, nebo konkrétní osoba 'vojta', 'peta', 'adel'
+  reviewAuthorId: 'vojta' // kdo právě píše recenzi
+};
 
 function load() {
   try {
@@ -27,16 +57,15 @@ function load() {
   } catch { return { venues: {} }; }
 }
 
-function save(venueIdToSync = null) {
+function save(venueId = null, authorId = null, recordData = null) {
+  if (venueId && window.DB) {
+    const aId = authorId || ui.reviewAuthorId;
+    const r = recordData || rec(venueId, aId);
+    window.DB.saveReview(venueId, aId, r);
+  }
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(state));
-  } catch {
-    toast('Chyba při ukládání', true);
-  }
-
-  if (venueIdToSync) {
-    syncVenueToServer(venueIdToSync);
-  }
+  } catch {}
 }
 
 /* Server je sdílená (globální) databáze, localStorage je lokální kopie.
@@ -123,8 +152,22 @@ async function syncAllFromServer() {
   }
 }
 
-const rec = id => state.venues[id] || (state.venues[id] = { visited: false, rating: 0, note: '', date: null });
-const isVisited = id => !!(state.venues[id] && state.venues[id].visited);
+const rec = (id, authorId = null) => {
+  const aId = authorId || ui.reviewAuthorId || (window.DB ? window.DB.getActiveAuthorId() : 'vojta');
+  if (window.DB) {
+    const rev = window.DB.getReview(id, aId);
+    if (rev) return rev;
+  }
+  return { visited: false, rating: 0, note: '', date: null };
+};
+
+const isVisited = (id, memberId = null) => {
+  const mId = memberId || ui.viewMemberId;
+  if (window.DB) {
+    return window.DB.isVisitedBy(id, mId);
+  }
+  return false;
+};
 
 /* ---------- KATEGORIE ---------- */
 const CATS = {
@@ -622,9 +665,34 @@ function updateLOD(force) {
 function showTip(e, u, v) {
   const t = $('#tip');
   if (v) {
-    const r = rec(v.id), c = cat(v.cat);
-    t.innerHTML = `<div class="font-medium flex items-center gap-2"><span class="w-2 h-2 shrink-0 ${r.visited ? 'bg-yes' : 'bg-no'}"></span>${esc(v.name)}</div>` +
-      `<div class="text-[11px] opacity-70 mt-0.5">${esc(c.label)}${v.desc ? ' · ' + esc(v.desc.length > 90 ? v.desc.slice(0, 89) + '…' : v.desc) : ''}</div>`;
+    const c = cat(v.cat);
+    const st = window.DB ? window.DB.getVenueStats(v.id) : null;
+    const currentMember = ui.viewMemberId !== 'all' && window.DB ? window.DB.getMember(ui.viewMemberId) : null;
+
+    let visStatus = false;
+    let statusText = '';
+
+    if (currentMember) {
+      visStatus = window.DB.isVisitedBy(v.id, currentMember.id);
+      const rev = window.DB.getReview(v.id, currentMember.id);
+      statusText = `<span class="w-2 h-2 shrink-0 ${visStatus ? 'bg-yes' : 'bg-no'}"></span>${esc(v.name)} ` +
+        `<span class="text-[10px] opacity-75">(${esc(currentMember.logo)} ${esc(currentMember.name)}: ${visStatus ? 'byl/a' + (rev && rev.rating ? ' ' + rev.rating + '★' : '') : 'nebyl/a'})</span>`;
+    } else {
+      visStatus = window.DB ? window.DB.isVisitedBy(v.id, 'all') : false;
+      statusText = `<span class="w-2 h-2 shrink-0 ${visStatus ? 'bg-yes' : 'bg-no'}"></span>${esc(v.name)}`;
+    }
+
+    let visitorsLine = '';
+    if (st && st.visitors.length > 0) {
+      visitorsLine = `<div class="text-[11px] text-[#f4d28d] mt-1 flex items-center gap-1.5 flex-wrap">` +
+        `<span>Byli zde:</span> ` +
+        st.visitors.map(vis => `<span title="${esc(vis.name)}: ${vis.rating ? vis.rating + '★' : 'navštíveno'}">${esc(vis.logo)} <b>${esc(vis.name)}</b>${vis.rating ? ' (' + vis.rating + '★)' : ''}</span>`).join(' · ') +
+        `</div>`;
+    }
+
+    t.innerHTML = `<div class="font-medium flex items-center gap-2">${statusText}</div>` +
+      `<div class="text-[11px] opacity-70 mt-0.5">${esc(c.label)}${v.desc ? ' · ' + esc(v.desc.length > 90 ? v.desc.slice(0, 89) + '…' : v.desc) : ''}</div>` +
+      visitorsLine;
   } else {
     if (!u.n) return;
     t.innerHTML = esc(u.n) +
@@ -684,21 +752,61 @@ const filterActive = () => ui.filter !== 'all' || ui.cats.size > 0 || !!ui.q;
 
 function refreshMap() {
   const active = filterActive();
+  const activeMember = ui.viewMemberId !== 'all' && window.DB ? window.DB.getMember(ui.viewMemberId) : null;
+  const allMembersCount = window.DB ? window.DB.getMembers().length : 3;
+
   for (const t of trackedNodes) {
-    const vis = isVisited(t.v.id), ok = !active || matches(t.v);
+    let vis = false;
+    let fillColor = NOPE;
+
+    if (activeMember) {
+      vis = window.DB ? window.DB.isVisitedBy(t.v.id, activeMember.id) : false;
+      fillColor = vis ? (activeMember.color || YES) : NOPE;
+    } else {
+      const st = window.DB ? window.DB.getVenueStats(t.v.id) : null;
+      vis = Boolean(st && st.visitorCount > 0);
+      if (st && st.visitorCount >= allMembersCount && allMembersCount > 0) {
+        fillColor = '#2563eb'; // Všichni navštívili
+      } else {
+        fillColor = vis ? YES : NOPE;
+      }
+    }
+
+    const ok = !active || matches(t.v);
     const cl = t.node.classList;
     cl.toggle('visited', vis);
     cl.toggle('sel', ui.sel === t.v.id);
     cl.toggle('dim', active && !ok);
-    const fill = vis ? YES : NOPE;
-    if (t.fill !== fill) { t.shape.setAttribute('fill', fill); t.fill = fill; }
+
+    if (t.fill !== fillColor) {
+      t.shape.setAttribute('fill', fillColor);
+      t.fill = fillColor;
+    }
   }
+
   for (const m of markNodes) {
-    const vis = isVisited(m.v.id), ok = !active || matches(m.v);
-    if (m.vis !== vis) {
-      m.bg.setAttribute('stroke', vis ? YES : NOPE);
+    let vis = false;
+    let strokeColor = NOPE;
+
+    if (activeMember) {
+      vis = window.DB ? window.DB.isVisitedBy(m.v.id, activeMember.id) : false;
+      strokeColor = vis ? (activeMember.color || YES) : NOPE;
+    } else {
+      const st = window.DB ? window.DB.getVenueStats(m.v.id) : null;
+      vis = Boolean(st && st.visitorCount > 0);
+      if (st && st.visitorCount >= allMembersCount && allMembersCount > 0) {
+        strokeColor = '#2563eb';
+      } else {
+        strokeColor = vis ? YES : NOPE;
+      }
+    }
+
+    const ok = !active || matches(m.v);
+    if (m.vis !== vis || m.lastStroke !== strokeColor) {
+      m.bg.setAttribute('stroke', strokeColor);
       m.ck.setAttribute('display', vis ? '' : 'none');
       m.vis = vis;
+      m.lastStroke = strokeColor;
     }
     const cl = m.wrap.classList;
     cl.toggle('dim', active && !ok);
@@ -738,17 +846,32 @@ function renderList() {
     html += `<div class="list-head"><span>${esc(f.name)}</span><span>${done} / ${arr.length}</span></div>`;
 
     html += arr.map(v => {
-      const r = rec(v.id), on = r.visited;
+      const on = isVisited(v.id);
+      const st = window.DB ? window.DB.getVenueStats(v.id) : null;
+      let visitorsBadges = '';
+      if (st && st.visitors.length > 0) {
+        visitorsBadges = `<div class="flex items-center gap-0.5 shrink-0" title="Navštívili: ${st.visitors.map(x => x.name).join(', ')}">` +
+          st.visitors.map(vis => `<span class="text-xs inline-block transform hover:scale-125 transition-transform" style="filter: drop-shadow(0 1px 1px rgba(0,0,0,0.1))">${esc(vis.logo)}</span>`).join('') +
+          `</div>`;
+      }
+
+      let ratingBadge = (st && st.avgRating)
+        ? `<span class="comm-rating-pill shrink-0" title="Průměrné hodnocení: ${st.avgRating} z 5 (${st.ratingCount} hodnocení)">★ ${st.avgRating}</span>`
+        : '';
+
       return `<div class="row ${ui.sel === v.id ? 'sel' : ''}" data-go="${v.id}">
           <button data-tog="${v.id}" class="check ${on ? 'on' : ''}" aria-pressed="${on}" aria-label="${on ? 'Zrušit označení' : 'Označit jako navštívené'}: ${esc(v.name)}">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="square" d="m5 13 4 4L19 7"/></svg>
           </button>
           <span class="logo-box w-9 h-9 p-1">${logoMarkup(v)}</span>
           <div class="min-w-0 flex-1">
-            <div class="row-name truncate">${esc(v.name)}</div>
+            <div class="row-name truncate flex items-center gap-1.5">
+              <span class="truncate">${esc(v.name)}</span>
+              ${ratingBadge}
+            </div>
             <div class="row-sub truncate">${esc(cat(v.cat).label)}${v.fc ? ' · food court' : ''}</div>
           </div>
-          ${r.rating ? `<span class="text-xs text-[#c98a1e] shrink-0 tabular-nums">${r.rating} ★</span>` : ''}
+          ${visitorsBadges}
         </div>`;
     }).join('');
   });
@@ -802,7 +925,21 @@ function renderDetail() {
   const p = $('#detail');
   if (!ui.sel) { p.classList.add('hidden'); p.classList.remove('flex'); return; }
   const v = venue(ui.sel);
-  const r = rec(v.id), c = cat(v.cat), f = floorOf(v.floor);
+  const c = cat(v.cat), f = floorOf(v.floor);
+
+  const members = window.DB ? window.DB.getMembers() : [];
+  let activeAuthor = (window.DB ? window.DB.getMember(ui.reviewAuthorId) : null) || members[0];
+  if (!activeAuthor && members.length) {
+    activeAuthor = members[0];
+    ui.reviewAuthorId = activeAuthor.id;
+  }
+
+  const currentRev = (activeAuthor && window.DB)
+    ? (window.DB.getReview(v.id, activeAuthor.id) || { visited: false, rating: 0, note: '', date: null })
+    : { visited: false, rating: 0, note: '', date: null };
+
+  const allReviews = window.DB ? window.DB.getVenueReviews(v.id) : [];
+  const vStats = window.DB ? window.DB.getVenueStats(v.id) : null;
 
   p.classList.remove('hidden');
   p.classList.add('flex');
@@ -825,26 +962,92 @@ function renderDetail() {
       ${v.open ? `<p class="text-xs text-ink2">${esc(v.open)}${v.web ? ` · <a href="${esc(v.web)}" target="_blank" rel="noopener" class="underline underline-offset-2 hover:text-ink">web</a>` : ''}</p>` : ''}
       ${v.tags?.length ? `<div class="flex flex-wrap gap-1.5">${v.tags.map(t => `<span class="chip static">${esc(t)}</span>`).join('')}</div>` : ''}
 
-      <div class="space-y-2.5">
-        <div class="status ${r.visited ? 'is-done' : ''}"><i></i>${r.visited ? 'Navštíveno' : 'Zatím nenavštíveno'}</div>
-        <button id="dTog" class="btn-primary ${r.visited ? 'is-done' : ''}">${r.visited ? 'Zrušit návštěvu' : 'Označit jako navštívené'}</button>
+      <!-- POVINNÝ VÝBĚR: KDO HODNOTÍ / KDO TAM BYL -->
+      <div class="space-y-2 border-t border-line pt-4">
+        <div class="flex items-center justify-between">
+          <label class="d-label !mb-0 font-semibold text-ink flex items-center gap-1">
+            <span>Kdo to píše / kdo tam byl:</span>
+            <span class="text-no font-bold" title="Povinné pole">*</span>
+          </label>
+          <button id="btnAddNewMemberInline" class="text-xs text-ink hover:underline font-semibold flex items-center gap-1">
+            <span>+ Přidat osobu & logo</span>
+          </button>
+        </div>
+        <div class="flex flex-wrap gap-1.5" id="authorPillsList">
+          ${members.map(m => memberPillMarkup(m, activeAuthor && m.id === activeAuthor.id)).join('')}
+        </div>
       </div>
 
-      <div class="${r.visited ? '' : 'opacity-40 pointer-events-none'} space-y-4 border-t border-line pt-5">
-        <div>
-          <span class="d-label">Hodnocení</span>
-          <div id="stars" class="flex items-center gap-1" role="group" aria-label="Hodnocení od jedné do pěti hvězd">
-            ${[1,2,3,4,5].map(i => `<button type="button" data-s="${i}" aria-label="${i} z 5" class="star ${i <= r.rating ? 'on' : ''}">★</button>`).join('')}
-            ${r.rating ? `<button type="button" data-s="0" class="ml-2 text-xs text-ink3 hover:text-no underline underline-offset-2">Smazat</button>` : ''}
+      <!-- FORMULÁŘ NÁVŠTĚVY PRO VYBRANOU OSOBU -->
+      ${activeAuthor ? `
+        <div class="p-3.5 bg-white border border-line space-y-4">
+          <div class="flex items-center justify-between">
+            <div class="font-semibold text-xs flex items-center gap-1.5" style="color:${esc(activeAuthor.color)}">
+              <span>${esc(activeAuthor.logo)}</span>
+              <span>Záznam pro: ${esc(activeAuthor.name)}</span>
+            </div>
+            <div class="status ${currentRev.visited ? 'is-done' : ''}"><i></i>${currentRev.visited ? 'Navštíveno' : 'Zatím nenavštíveno'}</div>
+          </div>
+
+          <button id="dTog" class="btn-primary ${currentRev.visited ? 'is-done' : ''}">
+            ${currentRev.visited ? 'Zrušit návštěvu pro ' + esc(activeAuthor.name) : 'Označit: ' + esc(activeAuthor.name) + ' zde byl/a'}
+          </button>
+
+          <div class="${currentRev.visited ? '' : 'opacity-40 pointer-events-none'} space-y-4 pt-1">
+            <div>
+              <span class="d-label">Hodnocení (${esc(activeAuthor.name)})</span>
+              <div id="stars" class="flex items-center gap-1" role="group" aria-label="Hodnocení od jedné do pěti hvězd">
+                ${[1,2,3,4,5].map(i => `<button type="button" data-s="${i}" aria-label="${i} z 5" class="star ${i <= (currentRev.rating || 0) ? 'on' : ''}">★</button>`).join('')}
+                ${currentRev.rating ? `<button type="button" data-s="0" class="ml-2 text-xs text-ink3 hover:text-no underline underline-offset-2">Smazat</button>` : ''}
+              </div>
+            </div>
+            <div>
+              <label class="d-label" for="dDate">Datum návštěvy</label>
+              <input id="dDate" type="date" value="${currentRev.date || ''}" class="field">
+            </div>
+            <div>
+              <label class="d-label" for="dNote">Poznámka / Co jste si dali</label>
+              <textarea id="dNote" rows="3" placeholder="Jak vám chutnalo, doporučení…" class="field resize-none leading-relaxed">${esc(currentRev.note || '')}</textarea>
+            </div>
           </div>
         </div>
-        <div>
-          <label class="d-label" for="dDate">Datum návštěvy</label>
-          <input id="dDate" type="date" value="${r.date || ''}" class="field">
+      ` : ''}
+
+      <!-- PŘEHLED VŠECH ČLENŮ: KDO Z PARTY ZDE BYL -->
+      <div class="border-t border-line pt-4 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <span class="d-label !mb-0 font-semibold text-ink">Kdo z party zde byl (${vStats ? vStats.visitorCount : 0}/${members.length})</span>
+          ${vStats && vStats.avgRating ? `<span class="comm-rating-pill">★ ${vStats.avgRating} / 5</span>` : ''}
         </div>
-        <div>
-          <label class="d-label" for="dNote">Poznámka</label>
-          <textarea id="dNote" rows="3" placeholder="Co jste si dali, jak chutnalo…" class="field resize-none">${esc(r.note)}</textarea>
+
+        <div class="space-y-1.5">
+          ${members.map(m => {
+            const rev = window.DB ? window.DB.getReview(v.id, m.id) : null;
+            const wasThere = rev && rev.visited;
+            if (wasThere) {
+              return `
+                <div class="p-2.5 bg-white border border-line space-y-1">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-1.5 font-medium text-xs text-ink">
+                      <span>${esc(m.logo)}</span>
+                      <span>${esc(m.name)}</span>
+                      <span class="text-yes text-[11px] font-semibold">✓ byl/a</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      ${rev.rating ? starsMarkup(rev.rating) : ''}
+                      ${rev.date ? `<span class="text-[10px] text-ink3 tabular-nums">${esc(rev.date)}</span>` : ''}
+                    </div>
+                  </div>
+                  ${rev.note ? `<p class="text-xs text-ink2 italic leading-relaxed pt-0.5">„${esc(rev.note)}“</p>` : ''}
+                </div>`;
+            } else {
+              return `
+                <div class="px-2.5 py-1.5 bg-paper border border-line text-xs text-ink3 flex items-center justify-between opacity-75">
+                  <span class="flex items-center gap-1.5">${esc(m.logo)} ${esc(m.name)}</span>
+                  <span>zatím nebyl/a</span>
+                </div>`;
+            }
+          }).join('')}
         </div>
       </div>
     </div>
@@ -854,35 +1057,98 @@ function renderDetail() {
     </div>`;
 
   $('#dClose').onclick = () => select(null);
-  $('#dTog').onclick = () => toggle(v.id);
   $('#dFocus').onclick = () => focusOn(v, 5);
-  $$('#stars [data-s]').forEach(b => b.onclick = () => { rec(v.id).rating = +b.dataset.s; save(v.id); renderDetail(); renderList(); });
-  $('#dDate').onchange = e => { rec(v.id).date = e.target.value || null; save(v.id); };
-  let nt;
-  $('#dNote').oninput = e => { clearTimeout(nt); nt = setTimeout(() => { rec(v.id).note = e.target.value; save(v.id); }, 300); };
+
+  const btnAddInline = $('#btnAddNewMemberInline');
+  if (btnAddInline) btnAddInline.onclick = () => openAddMemberModal();
+
+  // Přepínání kdo hodnotí (Vojta / Peťa / Adél ...)
+  $$('#authorPillsList [data-author]').forEach(btn => {
+    btn.onclick = () => {
+      const aId = btn.dataset.author;
+      ui.reviewAuthorId = aId;
+      if (window.DB) window.DB.setActiveAuthorId(aId);
+      renderDetail();
+    };
+  });
+
+  if (activeAuthor) {
+    const aId = activeAuthor.id;
+    const btnTog = $('#dTog');
+    if (btnTog) btnTog.onclick = () => toggle(v.id, aId);
+
+    $$('#stars [data-s]').forEach(b => {
+      b.onclick = () => {
+        const ratingVal = +b.dataset.s;
+        const cur = window.DB.getReview(v.id, aId) || { visited: true, rating: 0, note: '', date: null };
+        cur.rating = ratingVal;
+        cur.visited = true;
+        if (!cur.date) cur.date = new Date().toISOString().slice(0, 10);
+        save(v.id, aId, cur);
+        renderDetail();
+        renderList();
+      };
+    });
+
+    const dateInp = $('#dDate');
+    if (dateInp) {
+      dateInp.onchange = e => {
+        const cur = window.DB.getReview(v.id, aId) || { visited: true, rating: 0, note: '', date: null };
+        cur.date = e.target.value || null;
+        save(v.id, aId, cur);
+      };
+    }
+
+    const noteInp = $('#dNote');
+    if (noteInp) {
+      let nt;
+      noteInp.oninput = e => {
+        clearTimeout(nt);
+        nt = setTimeout(() => {
+          const cur = window.DB.getReview(v.id, aId) || { visited: true, rating: 0, note: '', date: null };
+          cur.note = e.target.value;
+          save(v.id, aId, cur);
+        }, 300);
+      };
+    }
+  }
 }
 
-function toggle(id) {
-  const r = rec(id);
-  r.visited = !r.visited;
-  if (r.visited && !r.date) r.date = new Date().toISOString().slice(0, 10);
-  if (!r.visited) r.rating = 0;
-  save(id);
-  const v = venue(id);
-  if (r.visited) {
-    const done = VENUES.filter(x => isVisited(x.id)).length;
-    toast(`${v.name} — navštíveno (${done}/${VENUES.length})`);
+function toggle(venueId, authorId = null) {
+  const aId = authorId || ui.reviewAuthorId || (window.DB ? window.DB.getActiveAuthorId() : 'vojta');
+  const cur = (window.DB ? window.DB.getReview(venueId, aId) : null) || { visited: false, rating: 0, note: '', date: null };
+  const newVisited = !cur.visited;
+
+  const updatedRev = {
+    visited: newVisited,
+    rating: newVisited ? (cur.rating || 0) : 0,
+    note: cur.note || '',
+    date: newVisited ? (cur.date || new Date().toISOString().slice(0, 10)) : null
+  };
+
+  save(venueId, aId, updatedRev);
+
+  const mem = window.DB ? window.DB.getMember(aId) : null;
+  const authorName = mem ? mem.name : aId;
+  const v = venue(venueId);
+
+  if (newVisited) {
+    toast(`${v ? v.name : venueId} — ${authorName} navštívil/a!`);
   }
   renderAll();
 }
 
 /* ============================================================
-   MODÁLY (DATA & EXPORT)
+   MODÁLY
    ============================================================ */
 const closeModal = () => $('#modal').classList.add('hidden');
 function openModal(html) {
   $('#modalBox').innerHTML = html;
-  const m = $('#modal');   m.classList.remove('hidden'); m.classList.add('flex');   m.onclick = e => { if (e.target === m) closeModal(); };   $$('#modalBox [data-close]').forEach(b => b.onclick = closeModal);
+  const m = $('#modal');
+  m.classList.remove('hidden');
+  m.classList.add('flex');
+  m.onclick = e => { if (e.target === m) closeModal(); };
+  $$('#modalBox [data-close]').forEach(b => b.onclick = closeModal);
 }
 
 const modalHead = title => `
@@ -893,58 +1159,352 @@ const modalHead = title => `
     </button>
   </div>`;
 
-$('#btnStats').onclick = () => {
-  const done = VENUES.filter(v => isVisited(v.id));
-  const rated = done.filter(v => rec(v.id).rating);
-  const avg = rated.length ? (rated.reduce((s, v) => s + rec(v.id).rating, 0) / rated.length).toFixed(1) : '–';
-  const byCat = {};
-  VENUES.forEach(v => { byCat[v.cat] ||= { t: 0, d: 0 }; byCat[v.cat].t++; if (isVisited(v.id)) byCat[v.cat].d++; });
-  const fcAll = VENUES.filter(v => v.fc), fcDone = fcAll.filter(v => isVisited(v.id)).length;
-  const stat = (n, l) => `<div><div class="font-display text-3xl font-semibold leading-none tabular-nums">${n}</div><div class="text-xs text-ink2 mt-1.5">${l}</div></div>`;
+/* MODÁL PRO PŘIDÁNÍ NOVÉHO ČLOVĚKA A LOGA */
+function openAddMemberModal() {
+  const emojis = ['👑', '🍕', '✨', '🍔', '☕', '🍣', '🌮', '🍩', '🥑', '🥩', '🍜', '🍦', '🍻', '🍟', '🦁', '🚀', '⭐', '🎈'];
+  const colors = ['#2563eb', '#e11d48', '#9333ea', '#3b8559', '#ea580c', '#0d9488', '#d97706', '#ec4899'];
+  let selectedEmoji = emojis[0];
+  let selectedColor = colors[0];
 
-  openModal(`${modalHead('Přehled')}
-    <div class="p-5 space-y-6">
-      <div class="grid grid-cols-3 gap-4">
-        ${stat(done.length, 'Navštíveno')}
-        ${stat(VENUES.length - done.length, 'Zbývá')}
-        ${stat(avg, 'Průměrné hodnocení')}
+  openModal(`
+    ${modalHead('Přidat novou osobu & logo')}
+    <form id="addMemberForm" class="p-5 space-y-4">
+      <div>
+        <label class="d-label" for="newMemName">Jméno osoby <span class="text-no">*</span></label>
+        <input id="newMemName" type="text" placeholder="např. Honza, Bára, Kačka..." required autocomplete="off" class="field">
       </div>
-      <p class="text-sm text-ink2">Food court: <b class="text-ink font-semibold">${fcDone}</b> z ${fcAll.length} podniků</p>
-      <div class="space-y-2.5 border-t border-line pt-5">
-        ${Object.entries(byCat).sort((a, b) => b[1].t - a[1].t).map(([c, o]) => {
-          const p = Math.round(o.d / o.t * 100);
-          return `<div class="flex items-center gap-3 text-sm">
-            <span class="w-24 shrink-0 truncate text-ink2">${esc(cat(c).label)}</span>
-            <div class="flex-1 h-[3px] bg-line"><div class="h-full bg-yes" style="width:${p}%"></div></div>
-            <span class="w-9 text-right text-xs text-ink2 tabular-nums">${o.d}/${o.t}</span>
-          </div>`;
-        }).join('')}
+
+      <div>
+        <label class="d-label">Logo / Symbol</label>
+        <div class="grid grid-cols-6 gap-2 pt-1" id="emojiGrid">
+          ${emojis.map(em => `
+            <button type="button" class="emoji-btn ${em === selectedEmoji ? 'active' : ''}" data-emoji="${em}">${em}</button>
+          `).join('')}
+        </div>
+        <div class="mt-2.5 flex items-center gap-2">
+          <span class="text-xs text-ink2">Nebo zadejte vlastní symbol/emoji:</span>
+          <input id="customEmoji" type="text" maxlength="4" placeholder="emoji" class="field !w-20 !py-1 text-center font-bold">
+        </div>
       </div>
-    </div>`);
+
+      <div>
+        <label class="d-label">Barva na mapě</label>
+        <div class="flex gap-2 pt-1" id="colorGrid">
+          ${colors.map(c => `
+            <button type="button" class="w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 ${c === selectedColor ? 'border-ink scale-110' : 'border-transparent'}" style="background-color:${c}" data-col="${c}"></button>
+          `).join('')}
+        </div>
+      </div>
+
+      <div id="addMemberError" class="text-xs text-no hidden"></div>
+
+      <button type="submit" class="btn-primary mt-2">Přidat do party</button>
+    </form>
+  `);
+
+  $$('#emojiGrid .emoji-btn').forEach(b => b.onclick = () => {
+    selectedEmoji = b.dataset.emoji;
+    $$('#emojiGrid .emoji-btn').forEach(x => x.classList.toggle('active', x.dataset.emoji === selectedEmoji));
+    const ce = $('#customEmoji');
+    if (ce) ce.value = '';
+  });
+
+  const customInput = $('#customEmoji');
+  if (customInput) {
+    customInput.oninput = e => {
+      const v = e.target.value.trim();
+      if (v) {
+        selectedEmoji = v;
+        $$('#emojiGrid .emoji-btn').forEach(x => x.classList.remove('active'));
+      }
+    };
+  }
+
+  $$('#colorGrid button').forEach(b => b.onclick = () => {
+    selectedColor = b.dataset.col;
+    $$('#colorGrid button').forEach(x => x.classList.toggle('border-ink', x.dataset.col === selectedColor));
+    $$('#colorGrid button').forEach(x => x.classList.toggle('scale-110', x.dataset.col === selectedColor));
+  });
+
+  $('#addMemberForm').onsubmit = async e => {
+    e.preventDefault();
+    const name = $('#newMemName').value.trim();
+    const errBox = $('#addMemberError');
+    errBox.classList.add('hidden');
+
+    try {
+      const newM = await window.DB.addMember(name, selectedColor, selectedEmoji);
+      ui.reviewAuthorId = newM.id;
+      ui.viewMemberId = newM.id;
+      toast(`Přidána nová osoba: ${newM.logo} ${newM.name}`);
+      closeModal();
+      renderMemberNavTabs();
+      renderAll();
+    } catch (err) {
+      errBox.textContent = err.message || 'Chyba při přidávání osoby.';
+      errBox.classList.remove('hidden');
+    }
+  };
+}
+
+/* PŘEHLED NÁVŠTĚV & ŽEBŘÍČEK */
+$('#btnStats').onclick = () => {
+  const allVenueIds = VENUES.map(v => v.id);
+  const stats = window.DB ? window.DB.getAllStats(allVenueIds) : { memberStats: [], commonVenues: [], unvisitedVenues: [] };
+
+  openModal(`
+    ${modalHead('Přehled návštěv & Žebříček')}
+    <div class="p-5 space-y-6 max-h-[75vh] overflow-y-auto scroll-thin">
+      <div>
+        <div class="text-xs font-semibold text-ink2 uppercase tracking-wider mb-3">Žebříček návštěvnosti party</div>
+        <div class="divide-y divide-line border border-line bg-white">
+          ${stats.memberStats.map((ms, idx) => {
+            const pct = Math.round((ms.visitedCount / VENUES.length) * 100);
+            return `
+              <div class="p-3.5 flex items-center gap-3">
+                <span class="font-display font-semibold text-base text-ink3 w-5 text-center">${idx + 1}.</span>
+                <span class="text-xl">${esc(ms.member.logo)}</span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between">
+                    <span class="font-semibold text-sm text-ink">${esc(ms.member.name)}</span>
+                    <span class="text-xs text-[#c98a1e] font-medium">${ms.avgRating !== '–' ? '★ ' + ms.avgRating : ''}</span>
+                  </div>
+                  <div class="flex items-center gap-2 mt-1">
+                    <div class="flex-1 h-2 bg-line rounded-full overflow-hidden">
+                      <div class="h-full" style="width:${pct}%; background-color:${esc(ms.member.color)}"></div>
+                    </div>
+                    <span class="text-xs text-ink2 tabular-nums">${ms.visitedCount} / ${VENUES.length} (${pct} %)</span>
+                  </div>
+                </div>
+                <button class="btn !h-7 !px-2.5 text-xs shrink-0" data-view-member="${esc(ms.member.id)}">
+                  Zobrazit mapu
+                </button>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div class="p-3.5 bg-white border border-line text-center">
+          <div class="font-display text-2xl font-semibold text-yes tabular-nums">${stats.commonVenues.length}</div>
+          <div class="text-xs text-ink2 mt-1">Byli jsme všichni společně</div>
+        </div>
+        <div class="p-3.5 bg-white border border-line text-center">
+          <div class="font-display text-2xl font-semibold text-no tabular-nums">${stats.unvisitedVenues.length}</div>
+          <div class="text-xs text-ink2 mt-1">Kde ještě nikdo nebyl</div>
+        </div>
+      </div>
+
+      ${stats.commonVenues.length ? `
+        <div>
+          <div class="text-xs font-semibold text-ink2 uppercase tracking-wider mb-2">Společně navštívené podniky (${stats.commonVenues.length})</div>
+          <div class="flex flex-wrap gap-1.5">
+            ${stats.commonVenues.map(vId => {
+              const v = venue(vId);
+              return `<button class="chip static cursor-pointer hover:!border-ink" data-go="${esc(vId)}">${esc(v ? v.name : vId)}</button>`;
+            }).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      ${stats.unvisitedVenues.length ? `
+        <div>
+          <div class="text-xs font-semibold text-ink2 uppercase tracking-wider mb-2">Zatím nenavštívené podniky (${stats.unvisitedVenues.length})</div>
+          <div class="flex flex-wrap gap-1.5">
+            ${stats.unvisitedVenues.map(vId => {
+              const v = venue(vId);
+              return `<button class="chip static cursor-pointer hover:!border-ink text-ink3" data-go="${esc(vId)}">${esc(v ? v.name : vId)}</button>`;
+            }).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `);
+
+  $$('#modalBox [data-view-member]').forEach(b => b.onclick = () => {
+    const mId = b.dataset.viewMember;
+    closeModal();
+    ui.viewMemberId = mId;
+    ui.reviewAuthorId = mId;
+    window.DB.setActiveAuthorId(mId);
+    renderMemberNavTabs();
+    renderAll();
+  });
+
+  $$('#modalBox [data-go]').forEach(b => b.onclick = () => {
+    const vId = b.dataset.go;
+    const v = venue(vId);
+    closeModal();
+    if (v) {
+      if (v.floor !== ui.floor && v.floor !== OUT_ID) { ui.floor = v.floor; drawFloor(); renderFloors(); }
+      select(v.id, true);
+    }
+  });
 };
 
-$('#btnMenu').onclick = () => openModal(`${modalHead('Data')}
-  <div class="p-5 space-y-3">
-    <p class="text-sm text-ink2">Záznamy jsou uložené v tomto prohlížeči. Export vytvoří zálohu, kterou můžete načíst jinde.</p>
-    <div class="grid grid-cols-2 gap-3">
-      <button id="mExport" class="btn-ghost">Exportovat</button>
-      <button id="mImport" class="btn-ghost">Importovat</button>
+/* MODÁL DATA & NASTAVENÍ DATABÁZE */
+$('#btnMenu').onclick = () => openModal(`${modalHead('Data & Databáze')}
+  <div class="p-5 space-y-4 text-sm">
+    <div>
+      <div class="text-xs font-semibold text-ink2 uppercase tracking-wider mb-2">Cloudová Databáze (Vercel / Supabase)</div>
+      <p class="text-xs text-ink2 mb-3">Chcete-li, aby všichni na různých zařízeních a na Vercelu viděli stejné návštěvy, připojte Supabase.</p>
+      <button id="mDbSettings" class="btn-ghost flex items-center justify-center gap-2 font-medium !text-ink">
+        <svg class="w-4 h-4 text-yes" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+        Nastavení Supabase databáze
+      </button>
     </div>
-    <div class="grid grid-cols-2 gap-3 pt-2 border-t border-line">
-      <button id="mAll" class="btn-ghost">Označit vše</button>
-      <button id="mClear" class="btn-ghost hover:!border-no hover:!text-no">Smazat vše</button>
+
+    <div class="border-t border-line pt-3">
+      <div class="text-xs font-semibold text-ink2 uppercase tracking-wider mb-2">Správa osob</div>
+      <button id="mAddMemberBtn" class="btn-ghost">
+        + Přidat další osobu a logo
+      </button>
     </div>
-    <p class="text-xs text-ink3 pt-2">Kolečko = zoom · tažení = posun · klik = detail · dvojklik = změna stavu</p>
+
+    <div class="border-t border-line pt-3">
+      <div class="text-xs font-semibold text-ink2 uppercase tracking-wider mb-2">Lokální záloha</div>
+      <div class="grid grid-cols-2 gap-3">
+        <button id="mExport" class="btn-ghost">Exportovat JSON</button>
+        <button id="mImport" class="btn-ghost">Importovat JSON</button>
+      </div>
+    </div>
+
+    <div class="border-t border-line pt-3">
+      <button id="mClear" class="btn-ghost hover:!border-no hover:!text-no">Smazat všechna data</button>
+    </div>
   </div>`);
 
+function openDbSettingsModal() {
+  const cfg = window.APP_CONFIG || {};
+
+  openModal(`
+    ${modalHead('Nastavení Supabase databáze')}
+    <div class="p-5 space-y-4 text-sm">
+      <div class="p-3 bg-paper border border-line2 text-xs space-y-2 leading-relaxed text-ink2">
+        <p class="font-medium text-ink">Jak propojit aplikaci s databází na Vercelu / Supabase:</p>
+        <ol class="list-decimal pl-4 space-y-1">
+          <li>Založte projekt zdarma na <a href="https://supabase.com" target="_blank" rel="noopener" class="underline text-ink font-semibold">supabase.com</a>.</li>
+          <li>V <b>SQL Editoru</b> spusťte skript ze souboru <code class="bg-white px-1 py-0.5 border">supabase-schema.sql</code>.</li>
+          <li>V <b>Project Settings -> API</b> zkopírujte <b>Project URL</b> a <b>anon public key</b>:</li>
+        </ol>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="d-label" for="cfgUrl">Project URL (Supabase)</label>
+          <input id="cfgUrl" type="url" placeholder="https://xyzcompany.supabase.co" value="${esc(cfg.supabaseUrl || '')}" class="field">
+        </div>
+
+        <div>
+          <label class="d-label" for="cfgKey">Anon Public Key</label>
+          <input id="cfgKey" type="text" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." value="${esc(cfg.supabaseAnonKey || '')}" class="field font-mono text-xs">
+        </div>
+
+        <button id="btnSaveDbConfig" class="btn-primary">Uložit a připojit databázi</button>
+      </div>
+
+      <div class="border-t border-line pt-3 flex items-center justify-between">
+        <button id="btnResetToDemo" class="text-xs text-ink3 hover:text-ink underline">
+          Vymazat klíče a používat lokální režim
+        </button>
+      </div>
+    </div>`);
+
+  $('#btnSaveDbConfig').onclick = async () => {
+    const url = $('#cfgUrl').value.trim();
+    const key = $('#cfgKey').value.trim();
+    if (url && !url.startsWith('http')) return toast('URL musí začínat http:// nebo https://', true);
+
+    window.saveAppConfig(url, key);
+    toast('Konfigurace uložena, připojuji…');
+    closeModal();
+
+    await window.DB.init();
+    renderAll();
+  };
+
+  $('#btnResetToDemo').onclick = async () => {
+    window.saveAppConfig('', '');
+    toast('Přepnuto do lokálního režimu');
+    closeModal();
+    await window.DB.init();
+    renderAll();
+  };
+}
+
+/* ============================================================
+   LIŠTA VÝBĚRU OSOB (HLAVIČKA)
+   ============================================================ */
+function renderMemberNavTabs() {
+  const container = $('#memberNavTabs');
+  if (!container || !window.DB) return;
+  const members = window.DB.getMembers();
+
+  container.innerHTML = members.map(m => {
+    const isAct = ui.viewMemberId === m.id;
+    return `
+      <button class="view-btn ${isAct ? 'active' : ''}" data-member="${esc(m.id)}" style="${isAct ? 'background-color:' + esc(m.color) + '; color:#fff;' : ''}">
+        <span class="mr-1">${esc(m.logo)}</span>
+        <span>${esc(m.name)}</span>
+      </button>`;
+  }).join('');
+
+  $$('#viewSelector [data-member]').forEach(b => {
+    b.onclick = () => {
+      const mId = b.dataset.member;
+      ui.viewMemberId = mId;
+      if (mId !== 'all') {
+        ui.reviewAuthorId = mId;
+        window.DB.setActiveAuthorId(mId);
+      }
+      renderMemberNavTabs();
+      renderAll();
+
+      const inspectBanner = $('#inspectBanner');
+      const inspectText = $('#inspectText');
+      if (mId === 'all') {
+        if (inspectBanner) inspectBanner.classList.add('hidden');
+        toast('Zobrazena celková mapa všech návštěv');
+      } else {
+        const mObj = window.DB.getMember(mId);
+        if (inspectBanner && mObj) {
+          inspectBanner.classList.remove('hidden');
+          const count = window.DB.getVisitedCount(mId);
+          inspectText.innerHTML = `Mapa návštěv: ${esc(mObj.logo)} <b>${esc(mObj.name)}</b> (${count}/${VENUES.length} navštíveno)`;
+        }
+        if (mObj) toast(`Zobrazena mapa: ${mObj.logo} ${mObj.name}`);
+      }
+    };
+  });
+
+  const btnAll = $('#viewSelector [data-member="all"]');
+  if (btnAll) btnAll.classList.toggle('active', ui.viewMemberId === 'all');
+}
+
+// Události v dialogu Data
 document.addEventListener('click', e => {
-  const t = e.target.closest('#mExport,#mImport,#mAll,#mClear,#btnReset');
+  const t = e.target.closest('#mExport,#mImport,#mClear,#btnReset,#mDbSettings,#mAddMemberBtn');
   if (!t) return;
+
+  if (t.id === 'mDbSettings') {
+    closeModal();
+    openDbSettingsModal();
+    return;
+  }
+  if (t.id === 'mAddMemberBtn') {
+    closeModal();
+    openAddMemberModal();
+    return;
+  }
   if (t.id === 'mExport') {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const exportData = {
+      members: window.DB ? window.DB.getMembers() : [],
+      reviews: localStorage.getItem('fnk_reviews_v2') ? JSON.parse(localStorage.getItem('fnk_reviews_v2')) : {}
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `foodcourt-karolina-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `foodcourt-karolina-recenze-${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(a.href);
     toast('Exportováno');
   }
@@ -957,32 +1517,44 @@ document.addEventListener('click', e => {
       rd.onload = () => {
         try {
           const d = JSON.parse(rd.result);
-          if (!d || typeof d !== 'object' || !d.venues) throw 0;
-          state = d; save(); renderAll(); closeModal(); toast('Importováno');
-          clearServer().then(() => Promise.all(Object.keys(state.venues).map(syncVenueToServer)));
-        } catch { toast('Neplatný soubor', true); }
+          if (d && d.reviews) {
+            localStorage.setItem('fnk_reviews_v2', JSON.stringify(d.reviews));
+            if (d.members) localStorage.setItem('fnk_members_v2', JSON.stringify(d.members));
+            window.DB.init();
+            renderMemberNavTabs();
+            renderAll();
+            closeModal();
+            toast('Úspěšně importováno');
+          } else {
+            throw 0;
+          }
+        } catch { toast('Neplatný soubor zálohy', true); }
       };
       rd.readAsText(f);
     };
     i.click();
   }
-  if (t.id === 'mAll') {
-    if (!confirm('Opravdu označit všech ' + VENUES.length + ' podniků jako navštívené?')) return;
-    VENUES.forEach(v => {
-      const r = rec(v.id);
-      r.visited = true;
-      r.date ||= new Date().toISOString().slice(0, 10);
-      syncVenueToServer(v.id);
-    });
-    save(); renderAll(); closeModal();
-  }
   if (t.id === 'mClear' || t.id === 'btnReset') {
-    if (!confirm('Opravdu vymazat celý postup?')) return;
-    state = { venues: {} };
-    save(); ui.sel = null; renderAll(); closeModal(); toast('Vymazáno');
-    clearServer();
+    if (!confirm('Opravdu chcete vymazat všechny zaznamenané recenze a návštěvy?')) return;
+    localStorage.removeItem('fnk_reviews_v2');
+    if (window.DB) window.DB.init();
+    ui.sel = null;
+    renderAll();
+    closeModal();
+    toast('Vše vymazáno');
   }
 });
+
+const btnAddMem = $('#btnAddMember');
+if (btnAddMem) btnAddMem.onclick = () => openAddMemberModal();
+
+const inspectClose = $('#inspectClose');
+if (inspectClose) inspectClose.onclick = () => {
+  ui.viewMemberId = 'all';
+  renderMemberNavTabs();
+  renderAll();
+  $('#inspectBanner').classList.add('hidden');
+};
 
 /* ============================================================
    FILTRY UI + SIDEBAR
@@ -1004,6 +1576,21 @@ renderFloors();
 drawFloor();
 renderAll();
 fit(false);
+
+if (window.DB) {
+  window.DB.init().then(() => {
+    renderMemberNavTabs();
+    renderAll();
+    setStorageStatus(window.DB.isCloud());
+  });
+
+  window.DB.onChange(() => {
+    renderMemberNavTabs();
+    renderAll();
+    setStorageStatus(window.DB.isCloud());
+  });
+}
+
 syncAllFromServer();
 window.addEventListener('focus', syncAllFromServer);
 

@@ -169,3 +169,126 @@
 @media (max-width: 640px) {
   #floorBar { top: .5rem; }
 }
+
+/* ============================================================
+   KOMUNITA, PROFIL A AUTENTIZACE
+   ============================================================ */
+.avatar-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 9999px; font-weight: 600; color: #fff;
+  text-transform: uppercase; user-select: none; flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+.avatar-sm { width: 1.5rem; height: 1.5rem; font-size: .6875rem; }
+.avatar-md { width: 2rem; height: 2rem; font-size: .8125rem; }
+.avatar-lg { width: 2.75rem; height: 2.75rem; font-size: 1.125rem; }
+
+.btn-auth {
+  display: inline-flex; align-items: center; gap: .5rem;
+  height: 2rem; padding: 0 .75rem;
+  border: 1px solid var(--line-2); background: transparent;
+  font-size: .8125rem; font-weight: 500; color: var(--ink);
+  transition: all .12s ease;
+}
+.btn-auth:hover { background: #fff; border-color: var(--ink); }
+
+.view-selector {
+  display: inline-flex; align-items: center;
+  background: var(--paper); border: 1px solid var(--line-2);
+  padding: 2px; gap: 2px;
+}
+.view-btn {
+  padding: .25rem .625rem; font-size: .75rem; font-weight: 500;
+  color: var(--ink-2); transition: all .12s; white-space: nowrap;
+}
+.view-btn:hover { color: var(--ink); }
+.view-btn.active {
+  background: var(--ink); color: var(--paper);
+}
+
+.banner-inspect {
+  position: absolute; top: 3.5rem; left: 50%; transform: translateX(-50%);
+  z-index: 15; display: flex; align-items: center; gap: .75rem;
+  background: var(--ink); color: var(--paper);
+  padding: .375rem 1rem; border-radius: 9999px; font-size: .8125rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: slideup .15s ease-out;
+}
+.banner-inspect button {
+  background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 9999px;
+  font-size: .6875rem; font-weight: 600; text-transform: uppercase;
+}
+.banner-inspect button:hover { background: rgba(255,255,255,0.3); }
+
+.review-card {
+  background: #fff; border: 1px solid var(--line);
+  padding: .75rem; transition: border-color .12s;
+}
+.review-card:hover { border-color: var(--line-2); }
+.review-note {
+  margin-top: .375rem; font-size: .8125rem; color: var(--ink);
+  line-height: 1.4; word-break: break-word;
+}
+
+.comm-rating-pill {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: 1px 6px; background: #fff8eb; border: 1px solid #fae2b6;
+  color: #b47b18; font-size: .6875rem; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+
+.visitors-stack {
+  display: flex; align-items: center;
+}
+.visitors-stack .avatar-badge {
+  margin-left: -6px; border: 2px solid var(--paper);
+}
+.visitors-stack .avatar-badge:first-child {
+  margin-left: 0;
+}
+
+.user-rank-row {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .75rem 1rem; border-bottom: 1px solid var(--line);
+  transition: background-color .12s;
+}
+.user-rank-row:hover { background: #fff; }
+
+.modal-tab {
+  flex: 1; text-align: center; padding: .625rem; font-size: .875rem; font-weight: 500;
+  color: var(--ink-2); border-bottom: 2px solid transparent; transition: all .12s;
+}
+.modal-tab.active {
+  color: var(--ink); border-bottom-color: var(--ink); font-weight: 600;
+}
+
+/* Výběr osoby (Vojta, Peťa, Adél) v detailu */
+.author-pill {
+  display: inline-flex; align-items: center; gap: .375rem;
+  padding: .3125rem .625rem; border: 1px solid var(--line-2);
+  background: #fff; font-size: .8125rem; font-weight: 500;
+  color: var(--ink); cursor: pointer; transition: all .12s;
+}
+.author-pill:hover { border-color: var(--ink); }
+.author-pill.active {
+  background: var(--ink); color: var(--paper); border-color: var(--ink);
+}
+.author-pill.active .author-logo { transform: scale(1.1); }
+
+.author-logo {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: .875rem; line-height: 1;
+}
+
+.emoji-btn {
+  width: 2.25rem; height: 2.25rem; display: grid; place-items: center;
+  font-size: 1.125rem; border: 1px solid var(--line); background: #fff;
+  border-radius: .25rem; cursor: pointer; transition: all .12s;
+}
+.emoji-btn:hover { border-color: var(--ink); transform: scale(1.1); }
+.emoji-btn.active { border-color: var(--ink); background: #ede8df; }
+
+.status-person-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .5rem .75rem; border: 1px solid var(--line); background: #fff;
+}
+
+

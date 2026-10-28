@@ -26,41 +26,64 @@ Bez PHP (např. lokální náhled) aplikace funguje jen s `localStorage`.
 - **Kompas a grafické měřítko**, **LOD popisky** podle přiblížení
 - Klik na podnik v mapě i v seznamu otevře **stejný detail** — odškrtnutí, hodnocení
   hvězdičkami, datum návštěvy a poznámka. Dvojklik v mapě přepíná navštíveno.
-- Vyhledávání, filtry (vše / zbývá / hotovo), filtry podle kategorie, statistiky, export/import JSON
+- **Povinný výběr osoby při hodnocení** — žádné otravné přihlašování ani registrace heslem! Při hodnocení nebo odškrtnutí návštěvy jednoduše vyberete, kdo to píše (**Vojta**, **Peťa**, **Adél**).
+- **Možnost přidat nového člověka & logo** — jedním klikem přidáte dalšího kamaráda, zvolíte mu vlastní symbol/logo/emoji a barvu na mapě.
+- **Přehled hodnocení od každého z party** — v detailu každého podniku přehledně vidíte, kdo z party tam byl, jaké dal hodnocení hvězdičkami a co si dal dobrého.
+- **Chytré přepínání pohledu na mapu**:
+  - **Pohled „Všichni“** — celková mapa návštěv celé party (jaké podniky už někdo z vás navštívil, s odznáčky log návštěvníků).
+  - **Pohled „👑 Vojta“** — mapa návštěv Vojty.
+  - **Pohled „🍕 Peťa“** — mapa návštěv Péti.
+  - **Pohled „✨ Adél“** — mapa návštěv Adél (a dalších přidaných lidí).
+- **Žebříček návštěvnosti party & statistiky** — zjistěte, kdo z vás má nejvíce zářezů, které podniky jste navštívili všichni společně a kde naopak ještě nikdo z party nebyl.
+- **Cloudová databáze pro Vercel (Supabase PostgreSQL)** s automatickým lokálním režimem v prohlížeči.
 - Responzivní design (Tailwind CSS), funguje na mobilu i desktopu
 
-## Spuštění
+## Nasazení na Vercel + Supabase Databázi
+
+Web běží jako rychlá statická aplikace přímo na **Vercelu**, zatímco data o návštěvách a recenzích se ukládají do sdílené cloudové databáze **Supabase** (zdarma a bez nutnosti spravovat server):
+
+1. **Založení databáze v Supabase (zdarma)**:
+   - Na [supabase.com](https://supabase.com) založte nový projekt zdarma.
+   - V levém menu otevřete **SQL Editor** -> **New query**.
+   - Zkopírujte obsah souboru [`supabase-schema.sql`](supabase-schema.sql) a spusťte jej (**Run**).
+   - Tím se vytvoří tabulky `members` (s výchozími osobami Vojta, Peťa, Adél) a `reviews`.
+2. **Klíče k databázi**:
+   - V Supabase otevřete **Project Settings** -> **API**.
+   - Zkopírujte **Project URL** a **anon public key**.
+3. **Nasazení na Vercel**:
+   - Nahrajte repozitář na GitHub a importujte do [Vercel](https://vercel.com). Vercel nasadí web okamžitě (soubor [`vercel.json`](vercel.json) je již připraven).
+   - Na nasazeném webu klikněte na tlačítko **Data** -> **Nastavení Supabase databáze** a vložte zkopírované klíče (nebo je zadejte přímo do [`config.js`](config.js)).
+4. **Fungování bez konfigurace**:
+   - Bez zadaných klíčů běží web plně lokálně v prohlížeči (s přednastavenými ukázkami pro Vojtu, Peťu i Adél). Jakmile klíče zadáte, přepne se na živý cloud.
+
+## Spuštění lokálně
 
 ```bash
 git clone https://github.com/BlahaVojtech/Food-Court-Tracker.git
 cd Food-Court-Tracker
 python -m http.server 8777        # nebo: npm start
-# → http://localhost:8777 (lokální náhled bez PHP databáze)
+# → http://localhost:8777
 ```
-
-Pro plné ukládání nahrajte na hosting všechny soubory včetně `api.php` a zajistěte, aby PHP mělo
-zapnuté PDO SQLite a složka aplikace byla zapisovatelná. Databázový soubor se vytvoří automaticky
-při prvním požadavku. Na čistě statickém hostingu poběží pouze lokální záloha v prohlížeči.
-
-Všichni návštěvníci webu používají stejnou databázi: po načtení stránky vidí stejné návštěvy,
-hodnocení, komentáře i data. Přihlášení není zapnuté, takže každý návštěvník může sdílená data také
-měnit.
 
 ## Struktura
 
 | Soubor | Popis |
 |---|---|
-| `index.html` | Kostra aplikace, SVG `<defs>`, kompas, měřítko, legenda |
-| `styles.css` | Doplňkové styly mapy (jednotky, popisky, odznaky, zóna food courtu) |
+| `index.html` | Kostra aplikace, záhlaví s loginem a přepínačem zobrazení, SVG mapa |
+| `config.js` | Konfigurace cloudové databáze (Supabase URL & anon key) |
+| `db.js` | Databázová vrstva: Supabase Auth, ukládání recenzí, komunitní statistiky, porovnávání uživatelů a offline demo |
+| `supabase-schema.sql` | SQL schéma pro Supabase (tabulky `profiles`, `venue_reviews`, RLS politiky, triggery) |
+| `vercel.json` | Konfigurace pro nasazení na Vercel (clean URLs, hlavičky, cache) |
+| `styles.css` | Styly mapy, uživatelských avatarů, recenzních karet a komunitních prvků |
 | `tailwind.css` | **Generované** Tailwind CSS (`npm run build:css`) |
-| `app.js` | Logika — pan/zoom engine, vykreslování, seznam, detail, API synchronizace a localStorage záloha |
-| `api.php` | Bezinstalační API nad SQLite: aktuální stav i historie všech změn |
+| `app.js` | Logika aplikace: mapa, přepínač pohledů (Moje / Komunita / Přítel), detail s recenzemi, žebříček |
+| `api.php` | Alternativní bezinstalační PHP SQLite backend pro klasické webhostingy |
 | `plan.js` | **Generovaný** půdorys: `FLOORS` (5 pater × jednotky) + `VENUES` (34 podniků) |
 | `surround.js` | **Generované** okolí z OpenStreetMap + silueta centra + rámec mapy |
 | `extra.js` | **Generované** podniky v okolí centra, které nejsou v půdorysu |
 | `logos/*.webp` | **Generovaná** loga podniků (34×, celkem ~120 kB) |
 | `logos.js` | **Generovaný** rejstřík log (rozměry pro poměr stran odznaku) |
-| `tools/` | Generátory dat (viz níže) |
+| `tools/` | Generátory dat |
 
 ## Patra
 

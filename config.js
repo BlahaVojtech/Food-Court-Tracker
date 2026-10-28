@@ -1,0 +1,44 @@
+/* ============================================================
+   Food Court Tracker — Konfigurace cloudu (Supabase / Vercel)
+   ============================================================
+   Hodnoty můžete vložit sem před nasazením na Vercel, nebo
+   je zadat přímo v aplikaci v okně "Nastavení databáze".
+   Získat je můžete zdarma na https://supabase.com v Project Settings -> API.
+*/
+(() => {
+  'use strict';
+
+  // Výchozí konfigurace (lze vyplnit natvrdo nebo nechat prázdné a zadat v UI)
+  const DEFAULT_CONFIG = {
+    // Příklad: 'https://xyzcompany.supabase.co'
+    supabaseUrl: '',
+    // Příklad: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+    supabaseAnonKey: ''
+  };
+
+  function loadConfig() {
+    try {
+      const stored = localStorage.getItem('fnk_supabase_config');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            supabaseUrl: parsed.supabaseUrl || DEFAULT_CONFIG.supabaseUrl,
+            supabaseAnonKey: parsed.supabaseAnonKey || DEFAULT_CONFIG.supabaseAnonKey
+          };
+        }
+      }
+    } catch {}
+    return { ...DEFAULT_CONFIG };
+  }
+
+  window.APP_CONFIG = loadConfig();
+
+  window.saveAppConfig = function(url, key) {
+    window.APP_CONFIG.supabaseUrl = (url || '').trim();
+    window.APP_CONFIG.supabaseAnonKey = (key || '').trim();
+    try {
+      localStorage.setItem('fnk_supabase_config', JSON.stringify(window.APP_CONFIG));
+    } catch {}
+  };
+})();
